@@ -1,0 +1,82 @@
+:root {
+  /* Colors */
+  --bg-primary: #F4F7FE;
+  --bg-white: #FFFFFF;
+  
+  --color-primary: #4318FF;
+  --color-primary-light: #F4F7FE; /* Very light tint */
+  --color-secondary: #A3AED0;
+  --color-text-main: #2B3674;
+  --color-text-secondary: #A3AED0;
+  
+  --color-success: #05CD99;
+  --color-error: #EE5D50;
+  
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  
+  /* Shadows */
+  --shadow-sm: 0px 2px 4px rgba(112, 144, 176, 0.08);
+  --shadow-md: 0px 4px 12px rgba(112, 144, 176, 0.12);
+}
+
+body {
+  margin: 0;
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-primary);
+  color: var(--color-text-main);
+  height: 100vh;
+  overflow: hidden; /* App-like feel */
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #C4C4C4;
+  border-radius: 3px;
+}
+
+/* Utilities */
+.card {
+  background: var(--bg-white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--spacing-lg);
+}
+
+.text-primary { color: var(--color-primary); }
+.text-main { color: var(--color-text-main); }
+.text-secondary { color: var(--color-text-secondary); }
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-md);
+  transition: all 0.2s;
+}
+
+button:active {
+  transform: scale(0.98);
+}
