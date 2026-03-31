@@ -231,7 +231,7 @@ export const normalizeTransaction = async (row, camps = []) => {
             const cTokens = extractTokens(c.name);
             const cDates = extractDates(c.name);
 
-            if (cTokens.length === 0) continue;
+            if (cTokens.length === 0 && (!c.tags || c.tags.length === 0)) continue;
 
             let matchingTokens = 0;
 
@@ -256,8 +256,17 @@ export const normalizeTransaction = async (row, camps = []) => {
                 }
             }
 
-            const totalTokens = cTokens.length + cDates.size;
-            const score = totalTokens > 0 ? (matchingTokens + dateBonus) / totalTokens : 0;
+            // Tag bonus: user-defined keywords — each matching tag is a strong signal
+            const campTags = (c.tags || []).map(t => norm(t)).filter(t => t.length >= 2);
+            let tagBonus = 0;
+            for (const tag of campTags) {
+                if (tNorm.includes(tag)) {
+                    tagBonus += 2; // tags are stronger signal than regular tokens
+                }
+            }
+
+            const totalItems = cTokens.length + cDates.size + campTags.length * 2;
+            const score = totalItems > 0 ? (matchingTokens + dateBonus + tagBonus) / totalItems : 0;
 
             if (score > highestScore) {
                 highestScore = score;

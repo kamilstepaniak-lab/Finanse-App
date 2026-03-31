@@ -14,7 +14,7 @@ import {
     unsubscribe
 } from '../db';
 import { parseCSV, normalizeTransaction } from '../utils/csvParser';
-import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Wallet, Receipt } from 'lucide-react';
+import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt } from 'lucide-react';
 import './Dashboard.css';
 
 export default function Dashboard() {
@@ -22,6 +22,7 @@ export default function Dashboard() {
     const [categories, setCategories] = useState([]);
     const [camps, setCamps] = useState([]);
     const [selectedIds, setSelectedIds] = useState(new Set());
+    // Applied filter state (drives actual filtering)
     const [searchTerm, setSearchTerm] = useState('');
     const [filterType, setFilterType] = useState('income');
     const [isImporting, setIsImporting] = useState(false);
@@ -32,9 +33,9 @@ export default function Dashboard() {
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
     const [loading, setLoading] = useState(true);
     const [filterReview, setFilterReview] = useState(false);
-    const [filterMonth, setFilterMonth] = useState('');
-    const [lastDays, setLastDays] = useState('');
     const [pageSize, setPageSize] = useState(50);
+    // Draft filter state (what user is editing before applying)
+    const [draft, setDraft] = useState({ searchTerm: '', dateFrom: '', dateTo: '', filterMonth: '', lastDays: '', filterCategory: '', filterCamp: '' });
     const [lastClickedIndex, setLastClickedIndex] = useState(null);
     const [expandedIds, setExpandedIds] = useState(new Set());
     const [addingSubFor, setAddingSubFor] = useState(null);
@@ -65,10 +66,32 @@ export default function Dashboard() {
         loadData();
     }, []);
 
-    // Reset to page 1 whenever any filter or sort changes
+    // Reset to page 1 whenever any applied filter or sort changes
     useEffect(() => {
         setCurrentPage(1);
     }, [searchTerm, filterType, filterCategory, filterCamp, dateFrom, dateTo, filterReview, sortConfig, pageSize]);
+
+    const applyFilters = () => {
+        setSearchTerm(draft.searchTerm);
+        setDateFrom(draft.dateFrom);
+        setDateTo(draft.dateTo);
+        setFilterCategory(draft.filterCategory);
+        setFilterCamp(draft.filterCamp);
+    };
+
+    const clearFilters = () => {
+        const empty = { searchTerm: '', dateFrom: '', dateTo: '', filterMonth: '', lastDays: '', filterCategory: '', filterCamp: '' };
+        setDraft(empty);
+        setSearchTerm('');
+        setDateFrom('');
+        setDateTo('');
+        setFilterCategory('');
+        setFilterCamp('');
+        setFilterType('all');
+        setFilterReview(false);
+    };
+
+    const hasActiveDraft = draft.searchTerm !== searchTerm || draft.dateFrom !== dateFrom || draft.dateTo !== dateTo || draft.filterCategory !== filterCategory || draft.filterCamp !== filterCamp;
 
     // Setup realtime subscriptions
     useEffect(() => {
@@ -150,6 +173,7 @@ export default function Dashboard() {
         if (window.confirm(`Usunąć ${selectedIds.size} transakcji?`)) {
             await deleteTransactions(Array.from(selectedIds));
             setSelectedIds(new Set());
+            await loadTransactions();
         }
     };
 
@@ -159,6 +183,7 @@ export default function Dashboard() {
             Array.from(selectedIds).map(id => updateTransaction(id, { category: cat }))
         );
         setSelectedIds(new Set());
+        await loadTransactions();
     };
 
     const handleBulkCamp = async (camp) => {
@@ -166,8 +191,7 @@ export default function Dashboard() {
         await Promise.all(
             Array.from(selectedIds).map(id => updateTransaction(id, { camp: camp }))
         );
-        // NOTE: selection is intentionally preserved so the user can
-        // immediately click ✓ on any selected row to confirm all of them.
+        await loadTransactions();
     };
 
     const autoAssignCampsToExisting = async () => {
@@ -218,13 +242,14 @@ export default function Dashboard() {
 
     // Admin confirms the camp assignment — clears the needs_review flag
     // If the clicked transaction is part of a multi-selection, confirm ALL selected
-    const handleCampConfirm = (id) => {
+    const handleCampConfirm = async (id) => {
         if (selectedIds.has(id) && selectedIds.size > 1) {
-            Promise.all(Array.from(selectedIds).map(sid => updateTransaction(sid, { needs_review: false })));
+            await Promise.all(Array.from(selectedIds).map(sid => updateTransaction(sid, { needs_review: false })));
             setSelectedIds(new Set());
         } else {
-            updateTransaction(id, { needs_review: false });
+            await updateTransaction(id, { needs_review: false });
         }
+        await loadTransactions();
     };
 
     // Sub-transactions
@@ -264,11 +289,13 @@ export default function Dashboard() {
         const newSet = new Set(expandedIds);
         newSet.add(parentId);
         setExpandedIds(newSet);
+        await loadTransactions();
     };
 
     const handleDeleteSub = async (id) => {
         if (window.confirm('Usunąć tę podtransakcję?')) {
             await deleteTransactions([id]);
+            await loadTransactions();
         }
     };
 
@@ -305,6 +332,7 @@ export default function Dashboard() {
             });
             setShowCashModal(false);
             setCashForm({ type: 'income', date: new Date().toISOString().slice(0, 10), amount: '', currency: 'PLN', exchangeRate: '', title: '', sender: '', category: '', camp: '' });
+            await loadTransactions();
         } catch (err) {
             alert('Błąd zapisu: ' + err.message);
         }
@@ -334,11 +362,14 @@ export default function Dashboard() {
                 source_file: t.sourceFile
             }));
 
+            // Fetch fresh transactions from DB to avoid stale state during dedup
+            const freshTransactions = await getAllTransactions();
+
             // Deduplication logic inside Dashboard
             const newTransactions = formattedData.filter(newTx => {
-                return !transactions.some(existingTx =>
+                return !freshTransactions.some(existingTx =>
                     existingTx.date === newTx.date &&
-                    existingTx.amount === newTx.amount &&
+                    String(existingTx.amount) === String(newTx.amount) &&
                     existingTx.title === newTx.title &&
                     existingTx.sender === newTx.sender
                 );
@@ -350,6 +381,7 @@ export default function Dashboard() {
             }
 
             await addTransactions(newTransactions);
+            await loadTransactions();
 
             if (newTransactions.length < formattedData.length) {
                 alert(`Zaimportowano ${newTransactions.length} nowych transakcji. Pominięto ${formattedData.length - newTransactions.length} duplikatów!`);
@@ -365,8 +397,40 @@ export default function Dashboard() {
         }
     };
 
-    const handleCategoryChange = (id, newCategory) => {
-        updateTransaction(id, { category: newCategory });
+    const handleRemoveDuplicates = async () => {
+        if (!window.confirm('Czy na pewno chcesz usunąć duplikaty? Zostanie zachowana jedna kopia każdej transakcji (najstarsza według ID).')) return;
+        try {
+            const all = await getAllTransactions();
+            const seen = new Map();
+            const idsToDelete = [];
+
+            // Sort by id to keep the first-inserted one
+            const sorted = [...all].sort((a, b) => (a.id < b.id ? -1 : 1));
+            for (const tx of sorted) {
+                const key = `${tx.date}|${tx.amount}|${tx.title}|${tx.sender}`;
+                if (seen.has(key)) {
+                    idsToDelete.push(tx.id);
+                } else {
+                    seen.set(key, true);
+                }
+            }
+
+            if (idsToDelete.length === 0) {
+                alert('Brak duplikatów – wszystko jest w porządku!');
+                return;
+            }
+
+            await deleteTransactions(idsToDelete);
+            await loadTransactions();
+            alert(`Usunięto ${idsToDelete.length} duplikat${idsToDelete.length === 1 ? '' : idsToDelete.length < 5 ? 'y' : 'ów'}.`);
+        } catch (err) {
+            alert('Błąd: ' + err.message);
+        }
+    };
+
+    const handleCategoryChange = async (id, newCategory) => {
+        await updateTransaction(id, { category: newCategory });
+        await loadTransactions();
     };
 
     const handleCampChange = (id, newCamp) => {
@@ -443,30 +507,22 @@ export default function Dashboard() {
     };
 
     const handleMonthFilter = (monthStr) => {
-        setFilterMonth(monthStr);
-        setLastDays('');
         if (monthStr) {
             const [year, month] = monthStr.split('-').map(Number);
             const lastDay = new Date(year, month, 0).getDate();
-            setDateFrom(`${monthStr}-01`);
-            setDateTo(`${monthStr}-${String(lastDay).padStart(2, '0')}`);
+            setDraft(d => ({ ...d, filterMonth: monthStr, lastDays: '', dateFrom: `${monthStr}-01`, dateTo: `${monthStr}-${String(lastDay).padStart(2, '0')}` }));
         } else {
-            setDateFrom('');
-            setDateTo('');
+            setDraft(d => ({ ...d, filterMonth: '', dateFrom: '', dateTo: '' }));
         }
     };
 
     const handleLastDays = (days) => {
-        setLastDays(days);
-        setFilterMonth('');
         if (days && parseInt(days) > 0) {
             const cutoff = new Date();
             cutoff.setDate(cutoff.getDate() - parseInt(days));
-            setDateFrom(cutoff.toISOString().split('T')[0]);
-            setDateTo('');
+            setDraft(d => ({ ...d, lastDays: days, filterMonth: '', dateFrom: cutoff.toISOString().split('T')[0], dateTo: '' }));
         } else {
-            setDateFrom('');
-            setDateTo('');
+            setDraft(d => ({ ...d, lastDays: days, dateFrom: '', dateTo: '' }));
         }
     };
 
@@ -480,13 +536,13 @@ export default function Dashboard() {
     const totalPages = Math.ceil((filteredTransactions?.length || 0) / pageSize);
     const displayedTransactions = filteredTransactions?.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-    // KPI stats (from ALL non-sub transactions, unfiltered for full picture)
-    const allParent = (transactions || []).filter(t => !t.parent_id);
-    const kpiIncome  = allParent.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-    const kpiExpense = allParent.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+    // KPI stats — based on filtered transactions (respects all active filters)
+    const filteredParent = (filteredTransactions || []).filter(t => !t.parent_id);
+    const kpiIncome  = filteredParent.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const kpiExpense = filteredParent.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
     const kpiBalance = kpiIncome - kpiExpense;
-    const kpiCount   = allParent.length;
-    const kpiReview  = allParent.filter(t => t.needs_review).length;
+    const kpiCount   = filteredParent.length;
+    const kpiReview  = filteredParent.filter(t => t.needs_review).length;
     const fmt = (n) => n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     if (loading) {
@@ -497,18 +553,7 @@ export default function Dashboard() {
         <div className="dashboard-container">
 
             {/* ── KPI Cards ── */}
-            <div className="kpi-grid">
-                <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,#4318FF,#7551FF)' }}>
-                        <Wallet size={20} color="#fff" />
-                    </div>
-                    <div className="kpi-body">
-                        <span className="kpi-label">Saldo</span>
-                        <span className="kpi-value" style={{ color: kpiBalance >= 0 ? '#05CD99' : '#EE5D50' }}>
-                            {fmt(kpiBalance)} PLN
-                        </span>
-                    </div>
-                </div>
+            <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
                 <div className="kpi-card">
                     <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,#05CD99,#00B385)' }}>
                         <TrendingUp size={20} color="#fff" />
@@ -541,88 +586,33 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* Search & Actions Bar */}
-            <div className="action-bar" style={{ flexWrap: 'wrap', gap: '10px' }}>
-                <div className="left-controls" style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div className="search-box">
-                        <Search size={18} className="search-icon" />
-                        <input
-                            type="text"
-                            placeholder="Szukaj transakcji..."
-                            value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
-                        />
+            {/* Filter Panel */}
+            <div className="filter-panel">
+                {/* Row 1: Type toggles + quick review */}
+                <div className="filter-row">
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Typ</span>
+                        <div className="filter-group">
+                            {[['all','Wszystkie'],['income','Wpływy'],['expense','Koszty'],['euro','Euro']].map(([val, label]) => (
+                                <button key={val} className={`filter-btn ${filterType === val ? 'active' : ''}`} onClick={() => setFilterType(val)}>{label}</button>
+                            ))}
+                        </div>
                     </div>
-
-                    {/* Date Filters */}
-                    <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                        <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setFilterMonth(''); setLastDays(''); }} className="date-input" />
-                        <span>-</span>
-                        <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setFilterMonth(''); setLastDays(''); }} className="date-input" />
-                    </div>
-
-                    {/* Month filter */}
-                    <select
-                        value={filterMonth}
-                        onChange={e => handleMonthFilter(e.target.value)}
-                        className="date-input"
-                        style={{ cursor: 'pointer' }}
+                    <button
+                        className={`review-btn ${filterReview ? 'active' : ''}`}
+                        onClick={() => setFilterReview(v => !v)}
+                        title="Pokaż tylko transakcje wymagające przejrzenia"
                     >
-                        <option value="">-- Miesiąc --</option>
-                        {availableMonths.map(m => (
-                            <option key={m} value={m}>{formatMonth(m)}</option>
-                        ))}
-                    </select>
-
-                    {/* Last N days */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <input
-                            type="number"
-                            min="1"
-                            placeholder="Dni wstecz"
-                            value={lastDays}
-                            onChange={e => handleLastDays(e.target.value)}
-                            className="date-input"
-                            style={{ width: '100px' }}
-                        />
-                    </div>
-
-                    {/* Additional Filters */}
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                        <select
-                            value={filterCategory}
-                            onChange={e => setFilterCategory(e.target.value)}
-                            className="date-input"
-                            style={{ cursor: 'pointer' }}
-                        >
-                            <option value="">-- Wszystkie Kategorie --</option>
-                            {categories?.map(c => (
-                                <option key={c.id} value={c.name}>{c.name}</option>
-                            ))}
-                            <option value="Koszt">Koszt</option>
-                        </select>
-
-                        <select
-                            value={filterCamp}
-                            onChange={e => setFilterCamp(e.target.value)}
-                            className="date-input"
-                            style={{ cursor: 'pointer' }}
-                        >
-                            <option value="">-- Wszystkie Wyjazdy --</option>
-                            {camps?.map(c => (
-                                <option key={c.id} value={c.name}>{c.name}</option>
-                            ))}
-                        </select>
-
-                        {/* Sort by dropdown */}
+                        <span className="review-dot" />
+                        Do przejrzenia ({transactions.filter(t => t.needs_review).length})
+                    </button>
+                    <div className="filter-spacer" />
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Sortuj</span>
                         <select
                             value={`${sortConfig.key}_${sortConfig.direction}`}
-                            onChange={e => {
-                                const [key, direction] = e.target.value.split('_');
-                                setSortConfig({ key, direction });
-                            }}
-                            className="date-input"
-                            style={{ cursor: 'pointer' }}
+                            onChange={e => { const [key, direction] = e.target.value.split('_'); setSortConfig({ key, direction }); }}
+                            className="filter-select"
                         >
                             <option value="date_desc">Data ▼</option>
                             <option value="date_asc">Data ▲</option>
@@ -633,101 +623,126 @@ export default function Dashboard() {
                             <option value="sender_asc">Nadawca A-Z</option>
                             <option value="camp_asc">Wyjazd A-Z</option>
                         </select>
-
-                        {/* Page size */}
-                        <select
-                            value={pageSize}
-                            onChange={e => setPageSize(Number(e.target.value))}
-                            className="date-input"
-                            style={{ cursor: 'pointer' }}
-                        >
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Na stronie</span>
+                        <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} className="filter-select">
                             {[25, 50, 100, 150, 200, 400].map(n => (
-                                <option key={n} value={n}>Pokaż {n}</option>
+                                <option key={n} value={n}>{n}</option>
                             ))}
                         </select>
                     </div>
-
-                    <div className="filter-group">
-                        <button
-                            className={`filter-btn ${filterType === 'all' ? 'active' : ''}`}
-                            onClick={() => setFilterType('all')}
-                        >
-                            Wszystkie
-                        </button>
-                        <button
-                            className={`filter-btn ${filterType === 'income' ? 'active' : ''}`}
-                            onClick={() => setFilterType('income')}
-                        >
-                            Wpływy
-                        </button>
-                        <button
-                            className={`filter-btn ${filterType === 'expense' ? 'active' : ''}`}
-                            onClick={() => setFilterType('expense')}
-                        >
-                            Koszty
-                        </button>
-                        <button
-                            className={`filter-btn ${filterType === 'euro' ? 'active' : ''}`}
-                            onClick={() => setFilterType('euro')}
-                        >
-                            Euro
-                        </button>
-                    </div>
-
-                    <button
-                        className={`filter-btn ${filterReview ? 'active' : ''}`}
-                        onClick={() => setFilterReview(v => !v)}
-                        style={filterReview ? { background: '#FFF3F3', color: '#EE5D50', borderColor: '#EE5D50', border: '1px solid', fontWeight: 700 } : { color: '#EE5D50' }}
-                        title="Pokaż tylko transakcje wymagające przejrzenia"
-                    >
-                        🔴 Do przejrzenia ({transactions.filter(t => t.needs_review).length})
-                    </button>
                 </div>
 
-                <div className="action-buttons">
+                <div className="filter-divider" />
+
+                {/* Row 2: Search + date + category + camp */}
+                <div className="filter-row">
+                    <div className="filter-field-group" style={{ flex: '1', minWidth: '180px' }}>
+                        <span className="filter-field-label">Szukaj</span>
+                        <div className="search-box" style={{ width: '100%' }}>
+                            <Search size={15} className="search-icon" />
+                            <input
+                                type="text"
+                                placeholder="Tytuł lub nadawca..."
+                                value={draft.searchTerm}
+                                onChange={e => setDraft(d => ({ ...d, searchTerm: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Data od</span>
+                        <input type="date" value={draft.dateFrom} onChange={e => setDraft(d => ({ ...d, dateFrom: e.target.value, filterMonth: '', lastDays: '' }))} className="filter-select" />
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Data do</span>
+                        <input type="date" value={draft.dateTo} onChange={e => setDraft(d => ({ ...d, dateTo: e.target.value, filterMonth: '', lastDays: '' }))} className="filter-select" />
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Miesiąc</span>
+                        <select value={draft.filterMonth} onChange={e => handleMonthFilter(e.target.value)} className="filter-select">
+                            <option value="">Wszystkie</option>
+                            {availableMonths.map(m => (
+                                <option key={m} value={m}>{formatMonth(m)}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Dni wstecz</span>
+                        <input type="number" min="1" placeholder="np. 30" value={draft.lastDays} onChange={e => handleLastDays(e.target.value)} className="filter-select" style={{ width: '90px' }} />
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Kategoria</span>
+                        <select value={draft.filterCategory} onChange={e => setDraft(d => ({ ...d, filterCategory: e.target.value }))} className="filter-select">
+                            <option value="">Wszystkie</option>
+                            {categories?.map(c => (
+                                <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                            <option value="Koszt">Koszt</option>
+                        </select>
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Wyjazd</span>
+                        <select value={draft.filterCamp} onChange={e => setDraft(d => ({ ...d, filterCamp: e.target.value }))} className="filter-select">
+                            <option value="">Wszystkie</option>
+                            {camps?.map(c => (
+                                <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="filter-divider" />
+
+                {/* Row 3: Actions */}
+                <div className="filter-row filter-actions-row">
                     {selectedIds.size > 0 && (
-                        <div style={{ marginRight: '15px', color: '#666', fontSize: '14px' }}>
-                            Zaznaczono: {selectedIds.size}
-                            <button onClick={handleBulkDelete} style={{ marginLeft: '10px', color: 'red', border: 'none', background: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Usuń</button>
+                        <div className="selection-info">
+                            Zaznaczono: <strong>{selectedIds.size}</strong>
+                            <button className="selection-delete-btn" onClick={handleBulkDelete}>Usuń zaznaczone</button>
                         </div>
                     )}
-
                     <button
-                        className="filter-btn"
+                        className="btn-danger-ghost"
+                        onClick={handleRemoveDuplicates}
+                        title="Znajdź i usuń zduplikowane transakcje (zachowuje pierwszą kopię)"
+                    >
+                        Usuń duplikaty
+                    </button>
+                    <button
+                        className="btn-danger-ghost"
                         onClick={async () => {
                             if (window.confirm("Czy na pewno chcesz usunąć wszystkie transakcje?")) {
                                 await clearAllTransactions();
+                                await loadTransactions();
                             }
                         }}
-                        style={{ marginRight: 'auto', color: 'red' }} // push it to left side of action-buttons box
                     >
                         Usuń wszystko
                     </button>
-
-                    <div style={{ display: 'flex', gap: '10px' }}>
-                        <button
-                            className="btn-secondary"
-                            onClick={autoAssignCampsToExisting}
-                            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#4318FF', borderColor: '#4318FF', height: '42px', padding: '0 20px', borderRadius: '12px', fontWeight: 600 }}
-                            title="Spróbuj automatycznie przypisać wyjazdy do starszych transakcji w bazie"
-                        >
-                            <Wand2 size={18} />
-                            Auto-dopasuj
-                        </button>
-
-                        <label className="btn-primary" style={{ height: '42px', padding: '0 20px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', borderRadius: '12px', fontWeight: 600 }}>
-                            <Upload size={18} />
-                            <span>{isImporting ? 'Importowanie...' : 'Wgraj CSV'}</span>
-                            <input type="file" accept=".csv" onChange={handleFileUpload} hidden />
-                        </label>
-
-                        <button
-                            className="btn-cash"
-                            onClick={() => setShowCashModal(true)}
-                        >
-                            + Dodaj gotówkową
-                        </button>
-                    </div>
+                    <div className="filter-spacer" />
+                    <button className="btn-filter-clear" onClick={clearFilters}>Wyczyść filtry</button>
+                    <button className={`btn-filter-apply ${hasActiveDraft ? 'has-changes' : ''}`} onClick={applyFilters}>
+                        Zastosuj filtry
+                    </button>
+                    <div className="filter-actions-separator" />
+                    <button
+                        className="btn-secondary"
+                        onClick={autoAssignCampsToExisting}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                        title="Spróbuj automatycznie przypisać wyjazdy do starszych transakcji w bazie"
+                    >
+                        <Wand2 size={16} />
+                        Auto-dopasuj
+                    </button>
+                    <label className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer' }}>
+                        <Upload size={16} />
+                        <span>{isImporting ? 'Importowanie...' : 'Wgraj CSV'}</span>
+                        <input type="file" accept=".csv" onChange={handleFileUpload} hidden />
+                    </label>
+                    <button className="btn-cash" onClick={() => setShowCashModal(true)}>
+                        + Gotówkowa
+                    </button>
                 </div>
             </div>
 
@@ -849,16 +864,18 @@ export default function Dashboard() {
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                             <select
                                                 value={t.camp || ''}
-                                                onChange={(e) => {
+                                                onChange={async (e) => {
                                                     const val = e.target.value;
                                                     if (selectedIds.has(t.id) && selectedIds.size > 1) {
                                                         if (window.confirm(`Zmienić wyjazd na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
-                                                            handleBulkCamp(val);
+                                                            await handleBulkCamp(val);
                                                         } else {
-                                                            updateTransaction(t.id, { camp: val, needs_review: false });
+                                                            await updateTransaction(t.id, { camp: val, needs_review: false });
+                                                            await loadTransactions();
                                                         }
                                                     } else {
-                                                        updateTransaction(t.id, { camp: val, needs_review: false });
+                                                        await updateTransaction(t.id, { camp: val, needs_review: false });
+                                                        await loadTransactions();
                                                     }
                                                 }}
                                                 className={`category-select ${t.needs_review ? 'needs-review-select' : ''}`}
