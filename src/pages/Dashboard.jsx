@@ -447,12 +447,16 @@ export default function Dashboard() {
         updateTransaction(id, { camp: newCamp, needs_review: false });
     };
 
-    // Pending edits only used for parent transactions (for showing ✓/× on camp column)
+    // Child transaction pending edits — stage change, confirm with ✓ or cancel with ×
+    const handleChildFieldChange = (id, field, value) => {
+        setPendingEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } }));
+    };
+
     const handleCommitEdit = (id) => {
         const edits = pendingEdits[id];
         if (!edits) return;
-        setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...edits, needs_review: false } : t));
-        updateTransaction(id, { ...edits, needs_review: false });
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...edits } : t));
+        updateTransaction(id, edits);
         setPendingEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
     };
 
@@ -1020,9 +1024,10 @@ export default function Dashboard() {
                                         </td>
                                         <td>
                                             <select
-                                                value={child.category || ''}
-                                                onChange={e => handleCategoryChange(child.id, e.target.value)}
+                                                value={pendingEdits[child.id]?.category ?? child.category ?? ''}
+                                                onChange={e => handleChildFieldChange(child.id, 'category', e.target.value)}
                                                 className="category-select"
+                                                style={pendingEdits[child.id]?.category !== undefined ? { border: '2px solid #4318FF' } : {}}
                                             >
                                                 <option value="">-- Wybierz --</option>
                                                 {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -1031,15 +1036,25 @@ export default function Dashboard() {
                                             </select>
                                         </td>
                                         <td>
-                                            <select
-                                                value={child.camp || ''}
-                                                onChange={e => handleCampChange(child.id, e.target.value)}
-                                                className="category-select"
-                                                style={{ width: '120px' }}
-                                            >
-                                                <option value="">-</option>
-                                                {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                            </select>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <select
+                                                    value={pendingEdits[child.id]?.camp ?? child.camp ?? ''}
+                                                    onChange={e => handleChildFieldChange(child.id, 'camp', e.target.value)}
+                                                    className="category-select"
+                                                    style={{ width: '100px', ...(pendingEdits[child.id]?.camp !== undefined ? { border: '2px solid #4318FF' } : {}) }}
+                                                >
+                                                    <option value="">-</option>
+                                                    {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                </select>
+                                                {pendingEdits[child.id] && (
+                                                    <>
+                                                        <button onClick={() => handleCommitEdit(child.id)} title="Zatwierdź"
+                                                            style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
+                                                        <button onClick={() => handleCancelEdit(child.id)} title="Anuluj"
+                                                            style={{ background: '#A3AED0', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
                                             <button
