@@ -207,6 +207,18 @@ export const updateCamp = async (id, updates) => {
     return data?.[0] || null;
 };
 
+export const renameCampInTransactions = async (oldName, newName) => {
+    const { error } = await supabase
+        .from('transactions')
+        .update({ camp: newName })
+        .eq('camp', oldName);
+
+    if (error) {
+        console.error('Error renaming camp in transactions:', error);
+        throw error;
+    }
+};
+
 export const deleteCamp = async (id) => {
     const { error } = await supabase
         .from('camps')

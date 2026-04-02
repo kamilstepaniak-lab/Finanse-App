@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getAllCamps, addCamp, getCampByName, deleteCamp, updateCamp, subscribeToCamps, unsubscribe } from '../db';
+import { getAllCamps, addCamp, getCampByName, deleteCamp, updateCamp, renameCampInTransactions, subscribeToCamps, unsubscribe } from '../db';
 import { Trash2, Edit2, Check, X, RefreshCw } from 'lucide-react';
 
 const STOP_WORDS = new Set([
@@ -200,6 +200,10 @@ export default function Camps() {
             setCamps(prev => prev.map(c => c.id === id ? { ...c, name, tags: mergedTags, season: editSeason } : c));
             cancelEditing();
             await updateCamp(id, { name, tags: mergedTags, season: editSeason });
+            // Rename all transactions that referenced the old camp name
+            if (name !== originalName) {
+                await renameCampInTransactions(originalName, name);
+            }
             await loadCamps();
         } catch (e) {
             console.error(e);
