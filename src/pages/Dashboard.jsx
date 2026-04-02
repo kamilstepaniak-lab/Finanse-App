@@ -43,6 +43,8 @@ export default function Dashboard() {
     const [newSub, setNewSub] = useState({ amount: '', category: '', camp: '', note: '' });
     const [currentPage, setCurrentPage] = useState(1);
     const [subFormKey, setSubFormKey] = useState(0);
+    // Pending edits: { [transactionId]: { category?: string, camp?: string } }
+    const [pendingEdits, setPendingEdits] = useState({});
 
     // Cash transaction modal
     const [showCashModal, setShowCashModal] = useState(false);
@@ -243,14 +245,15 @@ export default function Dashboard() {
 
     // Admin confirms the camp assignment — clears the needs_review flag
     // If the clicked transaction is part of a multi-selection, confirm ALL selected
-    const handleCampConfirm = async (id) => {
+    const handleCampConfirm = (id) => {
         if (selectedIds.has(id) && selectedIds.size > 1) {
-            await Promise.all(Array.from(selectedIds).map(sid => updateTransaction(sid, { needs_review: false })));
+            setTransactions(prev => prev.map(t => selectedIds.has(t.id) ? { ...t, needs_review: false } : t));
+            Promise.all(Array.from(selectedIds).map(sid => updateTransaction(sid, { needs_review: false })));
             setSelectedIds(new Set());
         } else {
-            await updateTransaction(id, { needs_review: false });
+            setTransactions(prev => prev.map(t => t.id === id ? { ...t, needs_review: false } : t));
+            updateTransaction(id, { needs_review: false });
         }
-        await loadTransactions();
     };
 
     // Sub-transactions
@@ -429,13 +432,24 @@ export default function Dashboard() {
         }
     };
 
-    const handleCategoryChange = async (id, newCategory) => {
-        await updateTransaction(id, { category: newCategory });
-        await loadTransactions();
+    const handleCategoryChange = (id, newCategory) => {
+        setPendingEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), category: newCategory } }));
     };
 
     const handleCampChange = (id, newCamp) => {
-        updateTransaction(id, { camp: newCamp });
+        setPendingEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), camp: newCamp } }));
+    };
+
+    const handleCommitEdit = (id) => {
+        const edits = pendingEdits[id];
+        if (!edits) return;
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...edits, needs_review: false } : t));
+        updateTransaction(id, { ...edits, needs_review: false });
+        setPendingEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
+    };
+
+    const handleCancelEdit = (id) => {
+        setPendingEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
     };
 
     const getCategoryStyle = (cat) => {
@@ -862,33 +876,34 @@ export default function Dashboard() {
                                         {children.length > 0 ? (
                                             <span style={{ color: '#A3AED0', fontSize: '12px', fontStyle: 'italic' }}>— podzielona —</span>
                                         ) : (
-                                        <select
-                                            value={t.category || ''}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                if (selectedIds.has(t.id) && selectedIds.size > 1) {
-                                                    if (window.confirm(`Zmienić kategorię na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
-                                                        handleBulkCategory(val);
-                                                    } else {
-                                                        handleCategoryChange(t.id, val);
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <select
+                                                value={pendingEdits[t.id]?.category ?? t.category ?? ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (selectedIds.has(t.id) && selectedIds.size > 1) {
+                                                        if (window.confirm(`Zmienić kategorię na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
+                                                            handleBulkCategory(val);
+                                                            return;
+                                                        }
                                                     }
-                                                } else {
                                                     handleCategoryChange(t.id, val);
-                                                }
-                                            }}
-                                            className="category-select"
-                                            style={{
-                                                ...getCategoryStyle(t.category),
-                                                ...((!t.category || t.category === '') ? { color: '#EE5D50', fontWeight: 600 } : {})
-                                            }}
-                                        >
-                                            <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
-                                            {categories?.map(c => (
-                                                <option key={c.id} value={c.name}>{c.name}</option>
-                                            ))}
-                                            <option value="Koszt">Koszt</option>
-                                            <option value="Zwrot">Zwrot</option>
-                                        </select>
+                                                }}
+                                                className="category-select"
+                                                style={{
+                                                    ...getCategoryStyle(pendingEdits[t.id]?.category ?? t.category),
+                                                    ...((!(pendingEdits[t.id]?.category ?? t.category)) ? { color: '#EE5D50', fontWeight: 600 } : {}),
+                                                    ...(pendingEdits[t.id]?.category !== undefined ? { border: '2px solid #4318FF' } : {})
+                                                }}
+                                            >
+                                                <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
+                                                {categories?.map(c => (
+                                                    <option key={c.id} value={c.name}>{c.name}</option>
+                                                ))}
+                                                <option value="Koszt">Koszt</option>
+                                                <option value="Zwrot">Zwrot</option>
+                                            </select>
+                                        </div>
                                         )}
                                     </td>
                                     <td>
@@ -897,38 +912,49 @@ export default function Dashboard() {
                                         ) : (
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                             <select
-                                                value={t.camp || ''}
+                                                value={pendingEdits[t.id]?.camp ?? t.camp ?? ''}
                                                 onChange={async (e) => {
                                                     const val = e.target.value;
                                                     if (selectedIds.has(t.id) && selectedIds.size > 1) {
                                                         if (window.confirm(`Zmienić wyjazd na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
                                                             await handleBulkCamp(val);
-                                                        } else {
-                                                            await updateTransaction(t.id, { camp: val, needs_review: false });
-                                                            await loadTransactions();
+                                                            return;
                                                         }
-                                                    } else {
-                                                        await updateTransaction(t.id, { camp: val, needs_review: false });
-                                                        await loadTransactions();
                                                     }
+                                                    handleCampChange(t.id, val);
                                                 }}
-                                                className={`category-select ${t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
-                                                style={{ width: '120px' }}
+                                                className={`category-select ${!pendingEdits[t.id] && t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
+                                                style={{
+                                                    width: '120px',
+                                                    ...(pendingEdits[t.id]?.camp !== undefined ? { border: '2px solid #4318FF' } : {})
+                                                }}
                                             >
                                                 <option value="">-</option>
                                                 {camps?.map(c => (
                                                     <option key={c.id} value={c.name}>{c.name}</option>
                                                 ))}
                                             </select>
-                                            {t.needs_review && (
+                                            {/* Show confirm/cancel when there are pending edits */}
+                                            {pendingEdits[t.id] ? (
+                                                <>
+                                                    <button
+                                                        onClick={() => handleCommitEdit(t.id)}
+                                                        title="Zatwierdź zmiany"
+                                                        style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                                    >✓</button>
+                                                    <button
+                                                        onClick={() => handleCancelEdit(t.id)}
+                                                        title="Anuluj zmiany"
+                                                        style={{ background: '#EE5D50', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                                    >×</button>
+                                                </>
+                                            ) : t.needs_review ? (
                                                 <button
                                                     className="confirm-btn"
                                                     onClick={() => handleCampConfirm(t.id)}
                                                     title="Zatwierdź to dopasowanie"
-                                                >
-                                                    ✓
-                                                </button>
-                                            )}
+                                                >✓</button>
+                                            ) : null}
                                         </div>
                                         )}
                                     </td>
@@ -1088,7 +1114,12 @@ export default function Dashboard() {
                                         </td>
                                         <td style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                             <button onClick={() => handleAddSub(t.id)} style={{ background: '#4318FF', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}>+ Dodaj</button>
-                                            <button onClick={() => setAddingSubFor(null)} style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#2B3674', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}>Gotowe</button>
+                                            <button onClick={() => {
+                                                setAddingSubFor(null);
+                                                // Clear needs_review on parent since split is now complete
+                                                setTransactions(prev => prev.map(tx => tx.id === t.id ? { ...tx, needs_review: false } : tx));
+                                                updateTransaction(t.id, { needs_review: false });
+                                            }} style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#2B3674', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}>Gotowe</button>
                                         </td>
                                     </tr>
                                 )}
