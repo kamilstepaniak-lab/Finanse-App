@@ -43,7 +43,7 @@ export default function Camps() {
 
     // Load initial data
     useEffect(() => {
-        loadCamps();
+        loadCamps(true);
     }, []);
 
     // Setup realtime subscriptions
@@ -58,11 +58,11 @@ export default function Camps() {
         };
     }, []);
 
-    const loadCamps = async () => {
-        setLoading(true);
+    const loadCamps = async (showLoading = false) => {
+        if (showLoading) setLoading(true);
         const data = await getAllCamps();
         setCamps(data);
-        setLoading(false);
+        if (showLoading) setLoading(false);
     };
 
     const detectSeasonFromName = (name) => {
@@ -101,8 +101,8 @@ export default function Camps() {
 
     const handleDeleteCamp = async (id) => {
         if (window.confirm('Czy na pewno chcesz usunąć ten wyjazd? (Nie usunie to przypisań w transakcjach)')) {
+            setCamps(prev => prev.filter(c => c.id !== id));
             await deleteCamp(id);
-            await loadCamps();
         }
     };
 
@@ -122,39 +122,43 @@ export default function Camps() {
         const tag = newTagInput.trim().toLowerCase();
         if (!tag) return;
         const existingTags = camp.tags || [];
+        setNewTagInput('');
         if (!existingTags.includes(tag)) {
-            setNewTagInput('');
-            await updateCamp(camp.id, { tags: [...existingTags, tag] });
-            await loadCamps();
-        } else {
-            setNewTagInput('');
+            const newTags = [...existingTags, tag];
+            setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, tags: newTags } : c));
+            await updateCamp(camp.id, { tags: newTags });
         }
     };
 
     const handleRemoveTag = async (camp, tag) => {
         const updatedTags = (camp.tags || []).filter(t => t !== tag);
+        setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, tags: updatedTags } : c));
         await updateCamp(camp.id, { tags: updatedTags });
-        await loadCamps();
     };
 
     const handleAutoAssignSeasons = async () => {
         let updated = 0;
-        for (const camp of camps) {
-            const detected = detectSeasonFromName(camp.name);
-            if (detected && camp.season !== detected) {
+        const updatedCamps = [...camps];
+        for (let i = 0; i < updatedCamps.length; i++) {
+            const camp = updatedCamps[i];
+            // Dates in name → auto-detect; no dates → default lato
+            const detected = detectSeasonFromName(camp.name) || 'lato';
+            if (camp.season !== detected) {
                 await updateCamp(camp.id, { season: detected });
+                updatedCamps[i] = { ...camp, season: detected };
                 updated++;
             }
         }
-        await loadCamps();
+        // Optimistic update — no loading flicker
+        setCamps(updatedCamps);
         alert(`Przypisano sezony do ${updated} obozów.`);
     };
 
     const handleRegenerateTags = async (camp) => {
         const autoTags = extractTagsFromName(camp.name);
         const merged = [...new Set([...autoTags, ...(camp.tags || [])])];
+        setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, tags: merged } : c));
         await updateCamp(camp.id, { tags: merged });
-        await loadCamps();
     };
 
     const handleSaveEdit = async (id, originalName) => {
@@ -176,8 +180,9 @@ export default function Camps() {
             const newAutoTags = extractTagsFromName(name);
             const manualTags = (camp?.tags || []).filter(t => !oldAutoTags.includes(t));
             const mergedTags = [...new Set([...newAutoTags, ...manualTags])];
-            await updateCamp(id, { name, tags: mergedTags, season: editSeason });
+            setCamps(prev => prev.map(c => c.id === id ? { ...c, name, tags: mergedTags, season: editSeason } : c));
             cancelEditing();
+            await updateCamp(id, { name, tags: mergedTags, season: editSeason });
         } catch (e) {
             console.error(e);
             alert('Wystąpił błąd podczas edycji wyjazdu: ' + e.message);
