@@ -6,6 +6,7 @@ import {
     addTransaction,
     addTransactions,
     updateTransaction,
+    deleteTransaction,
     deleteTransactions,
     getAllTransactionsIncludingDeleted,
     clearAllTransactions,
@@ -298,8 +299,10 @@ export default function Dashboard() {
 
     const handleDeleteSub = async (id) => {
         if (window.confirm('Usunąć tę podtransakcję?')) {
-            await deleteTransactions([id]);
-            await loadTransactions();
+            // Optimistic: remove instantly from UI
+            setTransactions(prev => prev.filter(t => t.id !== id));
+            // Hard delete from DB (children don't need soft-delete)
+            deleteTransaction(id);
         }
     };
 
@@ -433,13 +436,18 @@ export default function Dashboard() {
     };
 
     const handleCategoryChange = (id, newCategory) => {
-        setPendingEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), category: newCategory } }));
+        // Optimistic: update UI instantly, save in background
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, category: newCategory } : t));
+        updateTransaction(id, { category: newCategory });
     };
 
     const handleCampChange = (id, newCamp) => {
-        setPendingEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), camp: newCamp } }));
+        // Optimistic: update UI instantly, save in background
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, camp: newCamp, needs_review: false } : t));
+        updateTransaction(id, { camp: newCamp, needs_review: false });
     };
 
+    // Pending edits only used for parent transactions (for showing ✓/× on camp column)
     const handleCommitEdit = (id) => {
         const edits = pendingEdits[id];
         if (!edits) return;
@@ -876,34 +884,31 @@ export default function Dashboard() {
                                         {children.length > 0 ? (
                                             <span style={{ color: '#A3AED0', fontSize: '12px', fontStyle: 'italic' }}>— podzielona —</span>
                                         ) : (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                            <select
-                                                value={pendingEdits[t.id]?.category ?? t.category ?? ''}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    if (selectedIds.has(t.id) && selectedIds.size > 1) {
-                                                        if (window.confirm(`Zmienić kategorię na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
-                                                            handleBulkCategory(val);
-                                                            return;
-                                                        }
+                                        <select
+                                            value={t.category || ''}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (selectedIds.has(t.id) && selectedIds.size > 1) {
+                                                    if (window.confirm(`Zmienić kategorię na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
+                                                        handleBulkCategory(val);
+                                                        return;
                                                     }
-                                                    handleCategoryChange(t.id, val);
-                                                }}
-                                                className="category-select"
-                                                style={{
-                                                    ...getCategoryStyle(pendingEdits[t.id]?.category ?? t.category),
-                                                    ...((!(pendingEdits[t.id]?.category ?? t.category)) ? { color: '#EE5D50', fontWeight: 600 } : {}),
-                                                    ...(pendingEdits[t.id]?.category !== undefined ? { border: '2px solid #4318FF' } : {})
-                                                }}
-                                            >
-                                                <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
-                                                {categories?.map(c => (
-                                                    <option key={c.id} value={c.name}>{c.name}</option>
-                                                ))}
-                                                <option value="Koszt">Koszt</option>
-                                                <option value="Zwrot">Zwrot</option>
-                                            </select>
-                                        </div>
+                                                }
+                                                handleCategoryChange(t.id, val);
+                                            }}
+                                            className="category-select"
+                                            style={{
+                                                ...getCategoryStyle(t.category),
+                                                ...(!t.category ? { color: '#EE5D50', fontWeight: 600 } : {})
+                                            }}
+                                        >
+                                            <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
+                                            {categories?.map(c => (
+                                                <option key={c.id} value={c.name}>{c.name}</option>
+                                            ))}
+                                            <option value="Koszt">Koszt</option>
+                                            <option value="Zwrot">Zwrot</option>
+                                        </select>
                                         )}
                                     </td>
                                     <td>
@@ -912,7 +917,7 @@ export default function Dashboard() {
                                         ) : (
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                             <select
-                                                value={pendingEdits[t.id]?.camp ?? t.camp ?? ''}
+                                                value={t.camp || ''}
                                                 onChange={async (e) => {
                                                     const val = e.target.value;
                                                     if (selectedIds.has(t.id) && selectedIds.size > 1) {
@@ -923,38 +928,21 @@ export default function Dashboard() {
                                                     }
                                                     handleCampChange(t.id, val);
                                                 }}
-                                                className={`category-select ${!pendingEdits[t.id] && t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
-                                                style={{
-                                                    width: '120px',
-                                                    ...(pendingEdits[t.id]?.camp !== undefined ? { border: '2px solid #4318FF' } : {})
-                                                }}
+                                                className={`category-select ${t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
+                                                style={{ width: '120px' }}
                                             >
                                                 <option value="">-</option>
                                                 {camps?.map(c => (
                                                     <option key={c.id} value={c.name}>{c.name}</option>
                                                 ))}
                                             </select>
-                                            {/* Show confirm/cancel when there are pending edits */}
-                                            {pendingEdits[t.id] ? (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleCommitEdit(t.id)}
-                                                        title="Zatwierdź zmiany"
-                                                        style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                                                    >✓</button>
-                                                    <button
-                                                        onClick={() => handleCancelEdit(t.id)}
-                                                        title="Anuluj zmiany"
-                                                        style={{ background: '#EE5D50', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                                                    >×</button>
-                                                </>
-                                            ) : t.needs_review ? (
+                                            {t.needs_review && (
                                                 <button
                                                     className="confirm-btn"
                                                     onClick={() => handleCampConfirm(t.id)}
                                                     title="Zatwierdź to dopasowanie"
                                                 >✓</button>
-                                            ) : null}
+                                            )}
                                         </div>
                                         )}
                                     </td>
@@ -1031,46 +1019,27 @@ export default function Dashboard() {
                                             {child.amount?.toFixed(2)} PLN
                                         </td>
                                         <td>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <select
-                                                    value={pendingEdits[child.id]?.category ?? child.category ?? ''}
-                                                    onChange={e => handleCategoryChange(child.id, e.target.value)}
-                                                    className="category-select"
-                                                    style={pendingEdits[child.id]?.category !== undefined ? { border: '2px solid #4318FF' } : {}}
-                                                >
-                                                    <option value="">-- Wybierz --</option>
-                                                    {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                                    <option value="Koszt">Koszt</option>
-                                                    <option value="Zwrot">Zwrot</option>
-                                                </select>
-                                            </div>
+                                            <select
+                                                value={child.category || ''}
+                                                onChange={e => handleCategoryChange(child.id, e.target.value)}
+                                                className="category-select"
+                                            >
+                                                <option value="">-- Wybierz --</option>
+                                                {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                <option value="Koszt">Koszt</option>
+                                                <option value="Zwrot">Zwrot</option>
+                                            </select>
                                         </td>
                                         <td>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <select
-                                                    value={pendingEdits[child.id]?.camp ?? child.camp ?? ''}
-                                                    onChange={e => handleCampChange(child.id, e.target.value)}
-                                                    className="category-select"
-                                                    style={{ width: '110px', ...(pendingEdits[child.id]?.camp !== undefined ? { border: '2px solid #4318FF' } : {}) }}
-                                                >
-                                                    <option value="">-</option>
-                                                    {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                                </select>
-                                                {pendingEdits[child.id] ? (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handleCommitEdit(child.id)}
-                                                            title="Zatwierdź"
-                                                            style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                                                        >✓</button>
-                                                        <button
-                                                            onClick={() => handleCancelEdit(child.id)}
-                                                            title="Anuluj"
-                                                            style={{ background: '#EE5D50', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                                                        >×</button>
-                                                    </>
-                                                ) : null}
-                                            </div>
+                                            <select
+                                                value={child.camp || ''}
+                                                onChange={e => handleCampChange(child.id, e.target.value)}
+                                                className="category-select"
+                                                style={{ width: '120px' }}
+                                            >
+                                                <option value="">-</option>
+                                                {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                            </select>
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
                                             <button
