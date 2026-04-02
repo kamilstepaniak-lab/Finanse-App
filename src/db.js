@@ -8,6 +8,20 @@ export const getAllTransactions = async () => {
     const { data, error } = await supabase
         .from('transactions')
         .select('*')
+        .neq('is_deleted', true)
+        .order('date', { ascending: false });
+
+    if (error) {
+        console.error('Error fetching transactions:', error);
+        return [];
+    }
+    return data || [];
+};
+
+export const getAllTransactionsIncludingDeleted = async () => {
+    const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
         .order('date', { ascending: false });
 
     if (error) {
@@ -72,7 +86,7 @@ export const deleteTransaction = async (id) => {
 export const deleteTransactions = async (ids) => {
     const { error } = await supabase
         .from('transactions')
-        .delete()
+        .update({ is_deleted: true })
         .in('id', ids);
 
     if (error) {

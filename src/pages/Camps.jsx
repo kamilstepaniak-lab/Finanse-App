@@ -161,9 +161,26 @@ export default function Camps() {
         await updateCamp(camp.id, { tags: merged });
     };
 
+    const handleSeasonChange = async (camp, newSeason) => {
+        const season = camp.season === newSeason ? '' : newSeason;
+        setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, season } : c));
+        await updateCamp(camp.id, { season });
+    };
+
     const handleSaveEdit = async (id, originalName) => {
         const name = editName.trim();
-        if (!name || name === originalName) {
+        if (!name) {
+            cancelEditing();
+            return;
+        }
+
+        // Only season changed — no name validation needed
+        if (name === originalName) {
+            const camp = camps.find(c => c.id === id);
+            if (editSeason !== (camp?.season || '')) {
+                setCamps(prev => prev.map(c => c.id === id ? { ...c, season: editSeason } : c));
+                await updateCamp(id, { season: editSeason });
+            }
             cancelEditing();
             return;
         }
@@ -183,6 +200,7 @@ export default function Camps() {
             setCamps(prev => prev.map(c => c.id === id ? { ...c, name, tags: mergedTags, season: editSeason } : c));
             cancelEditing();
             await updateCamp(id, { name, tags: mergedTags, season: editSeason });
+            await loadCamps();
         } catch (e) {
             console.error(e);
             alert('Wystąpił błąd podczas edycji wyjazdu: ' + e.message);
@@ -296,10 +314,18 @@ export default function Camps() {
                                             ))}
                                         </div>
                                     ) : (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                             <span style={{ fontSize: '15px', fontWeight: 600, color: '#0D1B3E' }}>{camp.name}</span>
-                                            {camp.season === 'lato' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#FEF3C7', color: '#B45309', borderRadius: '6px', padding: '2px 8px' }}>☀️ Lato</span>}
-                                            {camp.season === 'zima' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#EFF6FF', color: '#1570EF', borderRadius: '6px', padding: '2px 8px' }}>❄️ Zima</span>}
+                                            <button
+                                                onClick={() => handleSeasonChange(camp, 'lato')}
+                                                title="Oznacz jako letni"
+                                                style={{ fontSize: '11px', fontWeight: 700, borderRadius: '6px', padding: '2px 8px', cursor: 'pointer', border: `1px solid ${camp.season === 'lato' ? '#FCD34D' : '#E2E8F0'}`, background: camp.season === 'lato' ? '#FEF3C7' : '#fff', color: camp.season === 'lato' ? '#B45309' : '#CBD5E1' }}
+                                            >☀️ Lato</button>
+                                            <button
+                                                onClick={() => handleSeasonChange(camp, 'zima')}
+                                                title="Oznacz jako zimowy"
+                                                style={{ fontSize: '11px', fontWeight: 700, borderRadius: '6px', padding: '2px 8px', cursor: 'pointer', border: `1px solid ${camp.season === 'zima' ? '#93C5FD' : '#E2E8F0'}`, background: camp.season === 'zima' ? '#EFF6FF' : '#fff', color: camp.season === 'zima' ? '#1570EF' : '#CBD5E1' }}
+                                            >❄️ Zima</button>
                                         </div>
                                     )}
                                     <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
