@@ -81,7 +81,13 @@ export default function Reports() {
     const reportData = useMemo(() => {
         if (!transactions) return { stats: {}, incomeByCategoryData: [], incomeByCampData: [], monthlyData: [], topExpenses: [], sumLato: 0, sumZima: 0 };
 
+        // Exclude split parents (have children) — count children instead, same as Dashboard
+        const splitParentIds = new Set(
+            transactions.filter(t => t.parent_id).map(t => t.parent_id)
+        );
+
         const filtered = transactions.filter(t => {
+            if (splitParentIds.has(t.id)) return false; // skip split parents
             if (dateFrom && t.date < dateFrom) return false;
             if (dateTo && t.date > dateTo) return false;
             return true;
@@ -102,9 +108,9 @@ export default function Reports() {
             .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
             .slice(0, 20);
 
-        // Monthly History
+        // Monthly History (also excludes split parents)
         const monthlyMap = {};
-        transactions.forEach(t => {
+        transactions.filter(t => !splitParentIds.has(t.id)).forEach(t => {
             const month = t.date.slice(0, 7);
             if (!monthlyMap[month]) monthlyMap[month] = { month, income: 0, expense: 0 };
             if (t.amount > 0) monthlyMap[month].income += t.amount;
