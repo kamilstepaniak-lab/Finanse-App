@@ -818,17 +818,6 @@ export default function Dashboard() {
                     >
                         Usuń duplikaty
                     </button>
-                    <button
-                        className="btn-danger-ghost"
-                        onClick={async () => {
-                            if (window.confirm("Czy na pewno chcesz usunąć wszystkie transakcje?")) {
-                                await clearAllTransactions();
-                                await loadTransactions();
-                            }
-                        }}
-                    >
-                        Usuń wszystko
-                    </button>
                     <div className="filter-spacer" />
                     <button className="btn-filter-clear" onClick={clearFilters}>Wyczyść filtry</button>
                     <button className={`btn-filter-apply ${hasActiveDraft ? 'has-changes' : ''}`} onClick={applyFilters}>
