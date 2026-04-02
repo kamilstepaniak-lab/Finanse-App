@@ -245,16 +245,6 @@ export default function Reports() {
                         <span>Przychody</span>
                         <h3>{reportData.stats.income.toLocaleString()} PLN</h3>
                         <small>{reportData.stats.incomeEUR.toLocaleString()} EUR</small>
-                        {(reportData.sumLato > 0 || reportData.sumZima > 0) && (
-                            <div style={{ display: 'flex', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: '12px', background: '#FEF3C7', color: '#B45309', borderRadius: '6px', padding: '2px 8px', fontWeight: 600 }}>
-                                    ☀️ {reportData.sumLato.toLocaleString('pl-PL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} PLN
-                                </span>
-                                <span style={{ fontSize: '12px', background: '#EFF6FF', color: '#1570EF', borderRadius: '6px', padding: '2px 8px', fontWeight: 600 }}>
-                                    ❄️ {reportData.sumZima.toLocaleString('pl-PL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} PLN
-                                </span>
-                            </div>
-                        )}
                     </div>
                 </div>
                 <div className="kpi-card expense">
@@ -345,15 +335,30 @@ export default function Reports() {
                                 <tbody>
                                     {reportData.incomeByCategoryData.map((cat, idx) => {
                                         const n = cat.name.toLowerCase();
-                                        const catColor = n.includes('turystyczna') ? '#059669'
+                                        const isTurystyczna = n.includes('turystyczna');
+                                        const catColor = isTurystyczna ? '#059669'
                                             : n.includes('pływania') ? '#1570EF'
                                             : n.includes('szkolenie') ? '#B07A1A'
                                             : undefined;
                                         return (
-                                        <tr key={idx}>
-                                            <td><strong style={catColor ? { color: catColor } : {}}>{cat.name}</strong></td>
-                                            <td className="pos fw-bold">{cat.value.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
-                                        </tr>
+                                        <React.Fragment key={idx}>
+                                            <tr>
+                                                <td><strong style={catColor ? { color: catColor } : {}}>{cat.name}</strong></td>
+                                                <td className="pos fw-bold">{cat.value.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
+                                            </tr>
+                                            {isTurystyczna && (reportData.sumLato > 0 || reportData.sumZima > 0) && (
+                                                <>
+                                                    <tr style={{ background: '#FFFBEB' }}>
+                                                        <td style={{ paddingLeft: '24px', fontSize: '12px', color: '#B45309' }}>☀️ Obozy letnie</td>
+                                                        <td style={{ fontSize: '12px', color: '#B45309', fontWeight: 600 }}>{reportData.sumLato.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
+                                                    </tr>
+                                                    <tr style={{ background: '#EFF6FF' }}>
+                                                        <td style={{ paddingLeft: '24px', fontSize: '12px', color: '#1570EF' }}>❄️ Obozy zimowe</td>
+                                                        <td style={{ fontSize: '12px', color: '#1570EF', fontWeight: 600 }}>{reportData.sumZima.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
+                                                    </tr>
+                                                </>
+                                            )}
+                                        </React.Fragment>
                                         );
                                     })}
                                     {reportData.incomeByCategoryData.length === 0 && (
