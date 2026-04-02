@@ -31,16 +31,29 @@ export default function Reports() {
     const [loading, setLoading] = useState(true);
 
     const now = new Date();
-    // Default: 1st day of current month to current day (today)
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
     const today = now.toISOString().slice(0, 10);
 
-    const [dateFrom, setDateFrom] = useState(firstDay);
-    const [dateTo, setDateTo] = useState(today);
+    // Restore last used date range from localStorage, fallback to current month
+    const savedFrom = localStorage.getItem('reports_dateFrom');
+    const savedTo = localStorage.getItem('reports_dateTo');
+    const savedMonth = localStorage.getItem('reports_selectedMonth');
+    const savedYear = localStorage.getItem('reports_selectedYear');
 
-    // Month/Year quick selectors state
-    const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-12
-    const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+    const initFrom = savedFrom || firstDay;
+    const initTo = savedTo || today;
+    const initMonth = savedMonth ? parseInt(savedMonth) : now.getMonth() + 1;
+    const initYear = savedYear ? parseInt(savedYear) : now.getFullYear();
+
+    const [dateFrom, setDateFromState] = useState(initFrom);
+    const [dateTo, setDateToState] = useState(initTo);
+    const [selectedMonth, setSelectedMonthState] = useState(initMonth);
+    const [selectedYear, setSelectedYearState] = useState(initYear);
+
+    const setDateFrom = (val) => { setDateFromState(val); localStorage.setItem('reports_dateFrom', val); };
+    const setDateTo = (val) => { setDateToState(val); localStorage.setItem('reports_dateTo', val); };
+    const setSelectedMonth = (val) => { setSelectedMonthState(val); localStorage.setItem('reports_selectedMonth', val); };
+    const setSelectedYear = (val) => { setSelectedYearState(val); localStorage.setItem('reports_selectedYear', val); };
 
     // Camp table sort: 'value' (default — highest first) or 'name' (A-Z)
     const [campSort, setCampSort] = useState('value');

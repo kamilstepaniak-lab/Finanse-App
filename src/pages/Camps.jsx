@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getAllCamps, addCamp, getCampByName, deleteCamp, updateCamp, renameCampInTransactions, subscribeToCamps, unsubscribe } from '../db';
+import { getAllCamps, addCamp, getCampByName, deleteCamp, updateCamp, renameCampInTransactions, getAllTransactions, subscribeToCamps, unsubscribe } from '../db';
 import { Trash2, Edit2, Check, X, RefreshCw } from 'lucide-react';
 
 const STOP_WORDS = new Set([
@@ -34,6 +34,10 @@ export default function Camps() {
     const [sortOrder, setSortOrder] = useState('asc');
     const [filterSeason, setFilterSeason] = useState(''); // '' | 'lato' | 'zima'
 
+    // Orphaned camp repair
+    const [orphanedCamps, setOrphanedCamps] = useState([]); // [{ oldName, count, reassignTo }]
+    const [showOrphanPanel, setShowOrphanPanel] = useState(false);
+
     // Editing state
     const [editingId, setEditingId] = useState(null);
     const [editName, setEditName] = useState('');
@@ -63,6 +67,38 @@ export default function Camps() {
         const data = await getAllCamps();
         setCamps(data);
         if (showLoading) setLoading(false);
+        // Check for orphaned camp names in transactions
+        checkOrphanedCamps(data);
+    };
+
+    const checkOrphanedCamps = async (campsList) => {
+        const txs = await getAllTransactions();
+        const campNames = new Set((campsList || []).map(c => c.name));
+        const orphanMap = {};
+        txs.forEach(t => {
+            if (t.camp && !campNames.has(t.camp)) {
+                orphanMap[t.camp] = (orphanMap[t.camp] || 0) + 1;
+            }
+        });
+        const orphans = Object.entries(orphanMap).map(([oldName, count]) => ({ oldName, count, reassignTo: '' }));
+        setOrphanedCamps(orphans);
+        if (orphans.length > 0) setShowOrphanPanel(true);
+    };
+
+    const handleOrphanReassign = async (orphan, newCampName) => {
+        setOrphanedCamps(prev => prev.map(o => o.oldName === orphan.oldName ? { ...o, reassignTo: newCampName } : o));
+    };
+
+    const handleFixOrphans = async () => {
+        for (const orphan of orphanedCamps) {
+            if (orphan.reassignTo === '__clear__') {
+                await renameCampInTransactions(orphan.oldName, '');
+            } else if (orphan.reassignTo) {
+                await renameCampInTransactions(orphan.oldName, orphan.reassignTo);
+            }
+        }
+        setOrphanedCamps([]);
+        setShowOrphanPanel(false);
     };
 
     const detectSeasonFromName = (name) => {
@@ -236,6 +272,52 @@ export default function Camps() {
                 </div>
             </div>
             <div style={{ padding: '24px' }}>
+
+                {/* Orphaned camps repair panel */}
+                {showOrphanPanel && orphanedCamps.length > 0 && (
+                    <div style={{ background: '#FFF5F5', border: '1.5px solid #FECACA', borderRadius: '12px', padding: '16px 20px', marginBottom: '20px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                            <div>
+                                <span style={{ fontWeight: 700, color: '#DC2626', fontSize: '14px' }}>⚠️ Transakcje z nieistniejącymi wyjazdami</span>
+                                <span style={{ fontSize: '12px', color: '#94A3B8', marginLeft: '8px' }}>Przypisz do właściwego wyjazdu lub wyczyść</span>
+                            </div>
+                            <button onClick={() => setShowOrphanPanel(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', fontSize: '18px', lineHeight: 1 }}>×</button>
+                        </div>
+                        {orphanedCamps.map(orphan => (
+                            <div key={orphan.oldName} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: '#DC2626', minWidth: '200px' }}>
+                                    "{orphan.oldName}"
+                                    <span style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginLeft: '6px' }}>({orphan.count} transakcji)</span>
+                                </span>
+                                <span style={{ color: '#94A3B8', fontSize: '13px' }}>→</span>
+                                <select
+                                    value={orphan.reassignTo}
+                                    onChange={e => handleOrphanReassign(orphan, e.target.value)}
+                                    style={{ padding: '6px 10px', borderRadius: '8px', border: '1.5px solid #E2EAFF', fontSize: '13px', color: '#0D1B3E', minWidth: '220px' }}
+                                >
+                                    <option value="">-- wybierz wyjazd --</option>
+                                    {[...camps].sort((a,b) => a.name.localeCompare(b.name)).map(c => (
+                                        <option key={c.id} value={c.name}>{c.name}</option>
+                                    ))}
+                                    <option value="__clear__">🗑 Wyczyść przypisanie</option>
+                                </select>
+                            </div>
+                        ))}
+                        <button
+                            onClick={handleFixOrphans}
+                            disabled={orphanedCamps.every(o => !o.reassignTo)}
+                            style={{
+                                marginTop: '10px', padding: '8px 20px', borderRadius: '8px',
+                                background: orphanedCamps.every(o => !o.reassignTo) ? '#E2E8F0' : '#DC2626',
+                                color: orphanedCamps.every(o => !o.reassignTo) ? '#94A3B8' : '#fff',
+                                border: 'none', fontWeight: 700, fontSize: '13px', cursor: orphanedCamps.every(o => !o.reassignTo) ? 'not-allowed' : 'pointer'
+                            }}
+                        >
+                            Napraw przypisania
+                        </button>
+                    </div>
+                )}
+
                 {/* Add form */}
                 <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
                     <input
