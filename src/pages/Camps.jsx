@@ -29,12 +29,15 @@ const extractTagsFromName = (name) => {
 export default function Camps() {
     const [camps, setCamps] = useState([]);
     const [newCampName, setNewCampName] = useState('');
+    const [newCampSeason, setNewCampSeason] = useState(''); // '' | 'lato' | 'zima'
     const [loading, setLoading] = useState(true);
-    const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'none'
+    const [sortOrder, setSortOrder] = useState('asc');
+    const [filterSeason, setFilterSeason] = useState(''); // '' | 'lato' | 'zima'
 
     // Editing state
     const [editingId, setEditingId] = useState(null);
     const [editName, setEditName] = useState('');
+    const [editSeason, setEditSeason] = useState('');
     const [addingTagFor, setAddingTagFor] = useState(null);
     const [newTagInput, setNewTagInput] = useState('');
 
@@ -62,11 +65,22 @@ export default function Camps() {
         setLoading(false);
     };
 
+    const detectSeasonFromName = (name) => {
+        const months = [];
+        const rng = /(\d{1,2})[-\/](\d{1,2})[.](\d{1,2})/g;
+        const sng = /(\d{1,2})[.](\d{1,2})(?:[.]\d{2,4})?/g;
+        let m;
+        while ((m = rng.exec(name)) !== null) months.push(parseInt(m[3]));
+        while ((m = sng.exec(name)) !== null) months.push(parseInt(m[2]));
+        if (months.length === 0) return '';
+        const avg = months.reduce((a, b) => a + b, 0) / months.length;
+        return (avg >= 5 && avg <= 8) ? 'lato' : 'zima';
+    };
+
     const handleAddCamp = async () => {
         const name = newCampName.trim();
         if (!name) return;
 
-        // Check if exists (case insensitive)
         const existing = await getCampByName(name);
         if (existing) {
             alert('Taki wyjazd już istnieje!');
@@ -75,8 +89,10 @@ export default function Camps() {
 
         try {
             const autoTags = extractTagsFromName(name);
-            await addCamp({ name: name, tags: autoTags });
+            const season = newCampSeason || detectSeasonFromName(name);
+            await addCamp({ name, tags: autoTags, season });
             setNewCampName('');
+            setNewCampSeason('');
         } catch (e) {
             console.error(e);
             alert('Wystąpił błąd podczas dodawania wyjazdu: ' + e.message);
@@ -93,11 +109,13 @@ export default function Camps() {
     const startEditing = (camp) => {
         setEditingId(camp.id);
         setEditName(camp.name);
+        setEditSeason(camp.season || '');
     };
 
     const cancelEditing = () => {
         setEditingId(null);
         setEditName('');
+        setEditSeason('');
     };
 
     const handleAddTag = async (camp) => {
@@ -117,6 +135,19 @@ export default function Camps() {
         const updatedTags = (camp.tags || []).filter(t => t !== tag);
         await updateCamp(camp.id, { tags: updatedTags });
         await loadCamps();
+    };
+
+    const handleAutoAssignSeasons = async () => {
+        let updated = 0;
+        for (const camp of camps) {
+            const detected = detectSeasonFromName(camp.name);
+            if (detected && camp.season !== detected) {
+                await updateCamp(camp.id, { season: detected });
+                updated++;
+            }
+        }
+        await loadCamps();
+        alert(`Przypisano sezony do ${updated} obozów.`);
     };
 
     const handleRegenerateTags = async (camp) => {
@@ -145,7 +176,7 @@ export default function Camps() {
             const newAutoTags = extractTagsFromName(name);
             const manualTags = (camp?.tags || []).filter(t => !oldAutoTags.includes(t));
             const mergedTags = [...new Set([...newAutoTags, ...manualTags])];
-            await updateCamp(id, { name: name, tags: mergedTags });
+            await updateCamp(id, { name, tags: mergedTags, season: editSeason });
             cancelEditing();
         } catch (e) {
             console.error(e);
@@ -159,47 +190,73 @@ export default function Camps() {
 
     return (
         <div className="card">
-            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                 <h3>Zarządzanie Wyjazdami</h3>
-                <button
-                    onClick={() => setSortOrder(sortOrder === 'asc' ? 'none' : 'asc')}
-                    style={{
-                        padding: '6px 12px',
-                        background: sortOrder === 'asc' ? '#e0e5f2' : 'transparent',
-                        border: '1px solid #e0e5f2',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        color: '#2b3674',
-                        fontWeight: 600
-                    }}
-                >
-                    {sortOrder === 'asc' ? 'Zresetuj sortowanie' : 'Sortuj po nazwie (A-Z)'}
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                        onClick={handleAutoAssignSeasons}
+                        style={{ padding: '6px 12px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#1570EF', fontWeight: 600 }}
+                        title="Przypisz sezony automatycznie na podstawie dat w nazwie obozu"
+                    >
+                        ☀️❄️ Auto-sezony
+                    </button>
+                    <button
+                        onClick={() => setSortOrder(sortOrder === 'asc' ? 'none' : 'asc')}
+                        style={{ padding: '6px 12px', background: sortOrder === 'asc' ? '#e0e5f2' : 'transparent', border: '1px solid #e0e5f2', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#2b3674', fontWeight: 600 }}
+                    >
+                        {sortOrder === 'asc' ? 'Zresetuj sortowanie' : 'Sortuj A-Z'}
+                    </button>
+                </div>
             </div>
             <div style={{ padding: '24px' }}>
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
+                {/* Add form */}
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
                     <input
                         type="text"
                         placeholder="Wpisz nazwę wyjazdu..."
                         value={newCampName}
                         onChange={e => setNewCampName(e.target.value)}
-                        style={{
-                            padding: '12px',
-                            borderRadius: '8px',
-                            border: '1px solid #ddd',
-                            flex: 1,
-                            fontSize: '15px'
-                        }}
+                        style={{ padding: '12px', borderRadius: '8px', border: '1px solid #ddd', flex: 1, minWidth: '200px', fontSize: '15px' }}
                         onKeyDown={(e) => e.key === 'Enter' && handleAddCamp()}
                     />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                        {[['lato','☀️ Lato','#FEF3C7','#B45309'],['zima','❄️ Zima','#EFF6FF','#1570EF']].map(([val, label, bg, color]) => (
+                            <button
+                                key={val}
+                                onClick={() => setNewCampSeason(s => s === val ? '' : val)}
+                                style={{
+                                    padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                                    border: `2px solid ${newCampSeason === val ? color : '#ddd'}`,
+                                    background: newCampSeason === val ? bg : '#fff',
+                                    color: newCampSeason === val ? color : '#94A3B8'
+                                }}
+                            >{label}</button>
+                        ))}
+                    </div>
                     <button className="btn-primary" onClick={handleAddCamp} style={{ padding: '0 24px' }}>
                         Dodaj
                     </button>
                 </div>
 
+                {/* Season filter */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                    {[['','Wszystkie','#4318FF'],['lato','☀️ Letnie','#B45309'],['zima','❄️ Zimowe','#1570EF']].map(([val, label, color]) => (
+                        <button
+                            key={val}
+                            onClick={() => setFilterSeason(val)}
+                            style={{
+                                padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                                border: `1px solid ${filterSeason === val ? color : '#e0e5f2'}`,
+                                background: filterSeason === val ? color : '#fff',
+                                color: filterSeason === val ? '#fff' : '#64748B'
+                            }}
+                        >{label}</button>
+                    ))}
+                </div>
+
                 <ul style={{ listStyle: 'none', padding: 0 }}>
                     {[...(camps || [])]
+                        .filter(c => !filterSeason || c.season === filterSeason)
                         .sort((a, b) => {
                             if (sortOrder === 'asc') return a.name.localeCompare(b.name);
                             return 0;
@@ -215,19 +272,30 @@ export default function Camps() {
                                 {/* Top row: name + actions */}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     {editingId === camp.id ? (
-                                        <input
-                                            type="text"
-                                            value={editName}
-                                            onChange={e => setEditName(e.target.value)}
-                                            style={{ flex: 1, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cdd4e0', fontSize: '15px', marginRight: '12px' }}
-                                            autoFocus
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') handleSaveEdit(camp.id, camp.name);
-                                                if (e.key === 'Escape') cancelEditing();
-                                            }}
-                                        />
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, marginRight: '12px' }}>
+                                            <input
+                                                type="text"
+                                                value={editName}
+                                                onChange={e => setEditName(e.target.value)}
+                                                style={{ flex: 1, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cdd4e0', fontSize: '15px' }}
+                                                autoFocus
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') handleSaveEdit(camp.id, camp.name);
+                                                    if (e.key === 'Escape') cancelEditing();
+                                                }}
+                                            />
+                                            {[['lato','☀️','#B45309','#FEF3C7'],['zima','❄️','#1570EF','#EFF6FF']].map(([val, icon, color, bg]) => (
+                                                <button key={val} onClick={() => setEditSeason(s => s === val ? '' : val)}
+                                                    style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', border: `2px solid ${editSeason === val ? color : '#ddd'}`, background: editSeason === val ? bg : '#fff', color: editSeason === val ? color : '#94A3B8' }}
+                                                >{icon}</button>
+                                            ))}
+                                        </div>
                                     ) : (
-                                        <span style={{ fontSize: '15px', fontWeight: 600, color: '#0D1B3E' }}>{camp.name}</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{ fontSize: '15px', fontWeight: 600, color: '#0D1B3E' }}>{camp.name}</span>
+                                            {camp.season === 'lato' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#FEF3C7', color: '#B45309', borderRadius: '6px', padding: '2px 8px' }}>☀️ Lato</span>}
+                                            {camp.season === 'zima' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#EFF6FF', color: '#1570EF', borderRadius: '6px', padding: '2px 8px' }}>❄️ Zima</span>}
+                                        </div>
                                     )}
                                     <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                                         {editingId === camp.id ? (
