@@ -7,6 +7,7 @@ import {
     addTransactions,
     updateTransaction,
     deleteTransactions,
+    getAllTransactionsIncludingDeleted,
     clearAllTransactions,
     subscribeToTransactions,
     subscribeToCategories,
@@ -32,7 +33,7 @@ export default function Dashboard() {
     const [filterCamp, setFilterCamp] = useState('');
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
     const [loading, setLoading] = useState(true);
-    const [filterReview, setFilterReview] = useState(false);
+    const [filterReview, setFilterReview] = useState(''); // '' | 'uncertain' | 'missing'
     const [pageSize, setPageSize] = useState(50);
     // Draft filter state (what user is editing before applying)
     const [draft, setDraft] = useState({ searchTerm: '', dateFrom: '', dateTo: '', filterMonth: '', lastDays: '', filterCategory: '', filterCamp: '' });
@@ -202,7 +203,7 @@ export default function Dashboard() {
             let updatedCount = 0;
             const requiresCamp = (category) => category && category.toLowerCase().includes('usługa turystyczna');
 
-            const unassigned = transactions.filter(t => !t.camp || t.camp.trim() === '');
+            const unassigned = transactions.filter(t => !t.camp || t.camp.trim() === '' || t.needs_review);
 
             for (const t of unassigned) {
                 const mockedRow = [t.date, t.amount, t.currency || 'PLN', t.sender, t.title];
@@ -362,8 +363,8 @@ export default function Dashboard() {
                 source_file: t.sourceFile
             }));
 
-            // Fetch fresh transactions from DB to avoid stale state during dedup
-            const freshTransactions = await getAllTransactions();
+            // Fetch ALL transactions including deleted — dedup must block re-import of deleted ones
+            const freshTransactions = await getAllTransactionsIncludingDeleted();
 
             // Deduplication logic inside Dashboard
             const newTransactions = formattedData.filter(newTx => {
@@ -441,6 +442,7 @@ export default function Dashboard() {
         if (cat === 'usługa turystyczna') return { color: '#05CD99', fontWeight: 600 };
         if (cat === 'nauka pływania') return { color: '#4318FF', fontWeight: 600 };
         if (cat === 'Szkolenie') return { color: '#FFB547', fontWeight: 600 };
+        if (cat === 'Zwrot') return { color: '#7C3AED', fontWeight: 600 };
         return {};
     };
 
@@ -469,7 +471,8 @@ export default function Dashboard() {
 
         if (filterCategory && t.category !== filterCategory) return false;
         if (filterCamp && t.camp !== filterCamp) return false;
-        if (filterReview && !t.needs_review) return false;
+        if (filterReview === 'uncertain' && !(t.needs_review && t.camp)) return false;
+        if (filterReview === 'missing' && !(t.needs_review && !t.camp)) return false;
 
         return true;
     }).sort((a, b) => {
@@ -537,12 +540,25 @@ export default function Dashboard() {
     const displayedTransactions = filteredTransactions?.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
     // KPI stats — based on filtered transactions (respects all active filters)
-    const filteredParent = (filteredTransactions || []).filter(t => !t.parent_id);
-    const kpiIncome  = filteredParent.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-    const kpiExpense = filteredParent.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+    // Split parents are excluded; their children are included individually (with same filters applied)
+    const splitParentIds = new Set(Object.keys(childrenByParent));
+    const kpiParents = (filteredTransactions || []).filter(t => !splitParentIds.has(t.id));
+    const kpiChildren = (transactions || []).filter(t => {
+        if (!t.parent_id) return false;
+        if (filterCamp && t.camp !== filterCamp) return false;
+        if (filterCategory && t.category !== filterCategory) return false;
+        if (dateFrom && t.date < dateFrom) return false;
+        if (dateTo && t.date > dateTo) return false;
+        return true;
+    });
+    const kpiItems   = [...kpiParents, ...kpiChildren];
+    const kpiIncome  = kpiItems.filter(t => t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
+    const kpiExpense = kpiItems.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
     const kpiBalance = kpiIncome - kpiExpense;
-    const kpiCount   = filteredParent.length;
-    const kpiReview  = filteredParent.filter(t => t.needs_review).length;
+    const kpiCount   = kpiItems.length;
+    const kpiZwrot   = kpiItems.filter(t => t.category === 'Zwrot' && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const kpiReview  = kpiParents.filter(t => t.needs_review && t.camp).length;
+    const kpiMissing = kpiParents.filter(t => t.needs_review && !t.camp).length;
     const fmt = (n) => n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     if (loading) {
@@ -580,7 +596,13 @@ export default function Dashboard() {
                         <span className="kpi-label">Transakcji</span>
                         <span className="kpi-value" style={{ color: '#1B2559' }}>{kpiCount.toLocaleString('pl-PL')}</span>
                         {kpiReview > 0 && (
-                            <span className="kpi-badge">{kpiReview} do przejrzenia</span>
+                            <span className="kpi-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>{kpiReview} do przejrzenia</span>
+                        )}
+                        {kpiMissing > 0 && (
+                            <span className="kpi-badge" style={{ background: '#FEE2E2', color: '#991B1B' }}>{kpiMissing} bez obozu</span>
+                        )}
+                        {kpiZwrot > 0 && (
+                            <span className="kpi-badge" style={{ background: '#EDE9FE', color: '#6D28D9' }}>{fmt(kpiZwrot)} PLN zwrotów</span>
                         )}
                     </div>
                 </div>
@@ -599,12 +621,22 @@ export default function Dashboard() {
                         </div>
                     </div>
                     <button
-                        className={`review-btn ${filterReview ? 'active' : ''}`}
-                        onClick={() => setFilterReview(v => !v)}
-                        title="Pokaż tylko transakcje wymagające przejrzenia"
+                        className={`review-btn ${filterReview === 'uncertain' ? 'active' : ''}`}
+                        onClick={() => setFilterReview(v => v === 'uncertain' ? '' : 'uncertain')}
+                        title="Pokaż transakcje z sugerowanym obozem (do potwierdzenia)"
+                        style={{ borderColor: '#F59E0B', color: filterReview === 'uncertain' ? '#fff' : '#92400E', background: filterReview === 'uncertain' ? '#F59E0B' : 'transparent' }}
                     >
-                        <span className="review-dot" />
-                        Do przejrzenia ({transactions.filter(t => t.needs_review).length})
+                        <span className="review-dot" style={{ background: '#F59E0B' }} />
+                        Do przejrzenia ({transactions.filter(t => t.needs_review && t.camp).length})
+                    </button>
+                    <button
+                        className={`review-btn ${filterReview === 'missing' ? 'active' : ''}`}
+                        onClick={() => setFilterReview(v => v === 'missing' ? '' : 'missing')}
+                        title="Pokaż transakcje bez przypisanego obozu"
+                        style={{ borderColor: '#EE5D50', color: filterReview === 'missing' ? '#fff' : '#991B1B', background: filterReview === 'missing' ? '#EE5D50' : 'transparent' }}
+                    >
+                        <span className="review-dot" style={{ background: '#EE5D50' }} />
+                        Bez obozu ({transactions.filter(t => t.needs_review && !t.camp).length})
                     </button>
                     <div className="filter-spacer" />
                     <div className="filter-field-group">
@@ -679,6 +711,7 @@ export default function Dashboard() {
                                 <option key={c.id} value={c.name}>{c.name}</option>
                             ))}
                             <option value="Koszt">Koszt</option>
+                            <option value="Zwrot">Zwrot</option>
                         </select>
                     </div>
                     <div className="filter-field-group">
@@ -786,7 +819,7 @@ export default function Dashboard() {
                                 const requiresCampSub = (cat) => cat && cat.toLowerCase().includes('usługa turystyczna');
                                 return (
                             <React.Fragment key={t.id}>
-                                <tr className={t.needs_review ? 'needs-review' : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
+                                <tr className={t.needs_review ? (t.camp ? 'needs-review-uncertain' : 'needs-review-missing') : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
                                     <td style={{ padding: '4px 8px', textAlign: 'center' }}>
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                                             {children.length > 0 && (
@@ -854,6 +887,7 @@ export default function Dashboard() {
                                                 <option key={c.id} value={c.name}>{c.name}</option>
                                             ))}
                                             <option value="Koszt">Koszt</option>
+                                            <option value="Zwrot">Zwrot</option>
                                         </select>
                                         )}
                                     </td>
@@ -878,7 +912,7 @@ export default function Dashboard() {
                                                         await loadTransactions();
                                                     }
                                                 }}
-                                                className={`category-select ${t.needs_review ? 'needs-review-select' : ''}`}
+                                                className={`category-select ${t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
                                                 style={{ width: '120px' }}
                                             >
                                                 <option value="">-</option>
@@ -979,6 +1013,7 @@ export default function Dashboard() {
                                                 <option value="">-- Wybierz --</option>
                                                 {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                                 <option value="Koszt">Koszt</option>
+                                                <option value="Zwrot">Zwrot</option>
                                             </select>
                                         </td>
                                         <td>
@@ -1035,6 +1070,7 @@ export default function Dashboard() {
                                                 <option value="">-- Kategoria --</option>
                                                 {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                                 <option value="Koszt">Koszt</option>
+                                                <option value="Zwrot">Zwrot</option>
                                             </select>
                                         </td>
                                         <td>
@@ -1221,6 +1257,8 @@ export default function Dashboard() {
                                     <select value={cashForm.category} onChange={e => setCashForm(f => ({ ...f, category: e.target.value }))}>
                                         <option value="">— Wybierz —</option>
                                         {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                        <option value="Koszt">Koszt</option>
+                                        <option value="Zwrot">Zwrot</option>
                                     </select>
                                 </div>
                                 <div className="cash-field">
