@@ -459,10 +459,13 @@ export default function Dashboard() {
     };
 
     // Commit pending edits for id — if id is in selectedIds, commits ALL selected
+    // If the committed transaction is a child, also clears needs_review on the parent
     const handleCommitEdit = (id) => {
         const idsToCommit = (selectedIds.has(id) && selectedIds.size > 1)
             ? Array.from(selectedIds)
             : [id];
+
+        const parentIdsToClear = new Set();
 
         setPendingEdits(prev => {
             const next = { ...prev };
@@ -470,12 +473,25 @@ export default function Dashboard() {
                 const edits = next[tid];
                 if (!edits) return;
                 const updates = { ...edits, needs_review: false };
-                setTransactions(p => p.map(t => t.id === tid ? { ...t, ...updates } : t));
+                setTransactions(p => {
+                    const tx = p.find(t => t.id === tid);
+                    if (tx?.parent_id) parentIdsToClear.add(tx.parent_id);
+                    return p.map(t => t.id === tid ? { ...t, ...updates } : t);
+                });
                 updateTransaction(tid, updates);
                 delete next[tid];
             });
             return next;
         });
+
+        // Clear needs_review on parent(s) after state update
+        setTimeout(() => {
+            parentIdsToClear.forEach(pid => {
+                setTransactions(p => p.map(t => t.id === pid ? { ...t, needs_review: false } : t));
+                updateTransaction(pid, { needs_review: false });
+            });
+        }, 0);
+
         if (selectedIds.has(id) && selectedIds.size > 1) setSelectedIds(new Set());
     };
 
@@ -532,8 +548,8 @@ export default function Dashboard() {
 
         if (filterCategory && t.category !== filterCategory) return false;
         if (filterCamp && t.camp !== filterCamp) return false;
-        if (filterReview === 'uncertain' && !(t.needs_review && t.camp && !splitParentIds.has(t.id))) return false;
-        if (filterReview === 'missing' && !(t.needs_review && !t.camp && !splitParentIds.has(t.id))) return false;
+        if (filterReview === 'uncertain' && !(t.needs_review && t.camp)) return false;
+        if (filterReview === 'missing' && !(t.needs_review && !t.camp)) return false;
 
         return true;
     }).sort((a, b) => {
@@ -687,7 +703,7 @@ export default function Dashboard() {
                         style={{ borderColor: '#F59E0B', color: filterReview === 'uncertain' ? '#fff' : '#92400E', background: filterReview === 'uncertain' ? '#F59E0B' : 'transparent' }}
                     >
                         <span className="review-dot" style={{ background: '#F59E0B' }} />
-                        Do przejrzenia ({transactions.filter(t => !splitParentIds.has(t.id) && t.needs_review && t.camp).length})
+                        Do przejrzenia ({transactions.filter(t => t.needs_review && t.camp).length})
                     </button>
                     <button
                         className={`review-btn ${filterReview === 'missing' ? 'active' : ''}`}
@@ -696,7 +712,7 @@ export default function Dashboard() {
                         style={{ borderColor: '#EE5D50', color: filterReview === 'missing' ? '#fff' : '#991B1B', background: filterReview === 'missing' ? '#EE5D50' : 'transparent' }}
                     >
                         <span className="review-dot" style={{ background: '#EE5D50' }} />
-                        Bez obozu ({transactions.filter(t => !splitParentIds.has(t.id) && t.needs_review && !t.camp).length})
+                        Bez obozu ({transactions.filter(t => t.needs_review && !t.camp).length})
                     </button>
                     <div className="filter-spacer" />
                     <div className="filter-field-group">
@@ -879,7 +895,7 @@ export default function Dashboard() {
                                 const requiresCampSub = (cat) => cat && cat.toLowerCase().includes('usługa turystyczna');
                                 return (
                             <React.Fragment key={t.id}>
-                                <tr className={!splitParentIds.has(t.id) && t.needs_review ? (t.camp ? 'needs-review-uncertain' : 'needs-review-missing') : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
+                                <tr className={t.needs_review ? (t.camp ? 'needs-review-uncertain' : 'needs-review-missing') : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
                                     <td style={{ padding: '4px 8px', textAlign: 'center' }}>
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                                             {children.length > 0 && (
