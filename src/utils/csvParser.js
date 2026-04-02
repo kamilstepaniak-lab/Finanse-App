@@ -107,6 +107,8 @@ export const normalizeTransaction = async (row, camps = []) => {
     const autoCategorize = (txt) => {
         const lower = txt.toLowerCase();
 
+        if (lower.includes('zwrot') || lower.includes('refund') || lower.includes('refundacja')) return 'Zwrot';
+
         if (
             lower.includes('plywani') ||
             lower.includes('pływani') ||
@@ -173,7 +175,7 @@ export const normalizeTransaction = async (row, camps = []) => {
 
     // Smart Camp Assignment (Wyjazd)
     // Returns: { camp: string, needsReview: boolean }
-    const attemptAutoAssignCamp = (textToSearch, campsList) => {
+    const attemptAutoAssignCamp = (textToSearch, campsList, transactionDate) => {
         if (!campsList || campsList.length === 0 || !textToSearch) return { camp: '', needsReview: false };
 
         const CHAR_MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z' };
@@ -181,19 +183,21 @@ export const normalizeTransaction = async (row, camps = []) => {
 
         // Stop-words that appear in camp names but carry no matching value
         const STOP_WORDS = new Set([
-            'oboz', 'oboz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus', 'rejs',
+            'oboz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus', 'rejs',
             'lato', 'zima', 'leni', 'zimow', 'ferie', 'wakacje',
-            // przymiotniki obozowe — nie pojawiają się w tytułach przelewów
+            // przymiotniki obozowe
             'letni', 'letnia', 'letnie', 'zimowy', 'zimowa', 'zimowe',
             'sportowy', 'sportowa', 'sportowe', 'sport',
             'morski', 'morska', 'gorski', 'gorska',
-            'narciarski', 'narciarska', 'narciarski',
+            'narciarski', 'narciarska',
             'mlodziezowy', 'mlodziezowa', 'mlodziezowe',
             'jezdziecki', 'taneczny', 'muzyczny', 'artystyczny',
-            // organizacyjne
-            'sekcja',
-            // ogólne słowa płatnicze
-            'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka', 'udzial', 'uczestnictwo'
+            // organizacyjne / poziomy programu — pojawiają się w wielu obozach, nie identyfikują konkretnego
+            'sekcja', 'family', 'hero', 'prokids', 'semipro', 'beeski',
+            // produkty dodatkowe
+            'karnet', 'karnety',
+            // słowa płatnicze
+            'rata', 'doplata', 'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka', 'udzial', 'uczestnictwo'
         ]);
 
         // Extract words >= 3 chars that are not stop-words.
@@ -252,6 +256,7 @@ export const normalizeTransaction = async (row, camps = []) => {
         let bestTokenRatio = 0;
         let bestHasAnyMatch = false;
         let isTie = false;
+        let tieCandidates = []; // track all camps with equal top score for date tie-breaking
 
         for (const c of campsList) {
             const cTokens = extractTokens(c.name);
@@ -313,18 +318,45 @@ export const normalizeTransaction = async (row, camps = []) => {
                 bestTokenRatio = tokenMatchRatio;
                 bestHasAnyMatch = hasAnyMatch;
                 isTie = false;
+                tieCandidates = [{ name: c.name, cDates }];
             } else if (Math.abs(score - highestScore) < 0.001 && score > 0) {
                 isTie = true;
+                tieCandidates.push({ name: c.name, cDates });
             }
         }
 
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
+        // Tie-breaker: use transaction date proximity to pick best camp
+        // e.g. "Suche 12-14.12" vs "Suche 19-22.12" — choose the one whose dates are closest to transaction date
+        if (isTie && transactionDate && tieCandidates.length > 1) {
+            const tDate = new Date(transactionDate);
+            let closestName = null;
+            let closestDiff = Infinity;
+            for (const candidate of tieCandidates) {
+                for (const d of candidate.cDates) {
+                    const [day, month] = d.split('.').map(Number);
+                    // Try same year and adjacent years
+                    for (const yr of [tDate.getFullYear(), tDate.getFullYear() + 1, tDate.getFullYear() - 1]) {
+                        const campDate = new Date(yr, month - 1, day);
+                        const diff = Math.abs((tDate - campDate) / (1000 * 60 * 60 * 24));
+                        if (diff < closestDiff) {
+                            closestDiff = diff;
+                            closestName = candidate.name;
+                        }
+                    }
+                }
+            }
+            // Only use date tie-breaker if within 90 days
+            if (closestName && closestDiff <= 90) {
+                return { camp: closestName, needsReview: false };
+            }
+        }
+
         // Certain match: no tie AND at least one keyword hit
-        // System uses all keywords (name tokens + tags) — any unique match is enough
         const isCertain = !isTie && bestHasAnyMatch;
 
-        // Tie: still assign best candidate but always flag for review
+        // Tie: still assign best candidate but flag for review
         if (isCertain) return { camp: bestMatch, needsReview: false };
         if (highestScore >= 0.3) return { camp: bestMatch, needsReview: true };
         return { camp: '', needsReview: true };
@@ -332,7 +364,7 @@ export const normalizeTransaction = async (row, camps = []) => {
 
     const requiresCamp = category && category.toLowerCase().includes('usługa turystyczna');
     const matchResult = requiresCamp
-        ? attemptAutoAssignCamp(`${title} ${sender}`, camps)
+        ? attemptAutoAssignCamp(`${title} ${sender}`, camps, date)
         : { camp: '', needsReview: false };
     let assignedCamp = matchResult.camp;
     let needsReview = matchResult.needsReview;

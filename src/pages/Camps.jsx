@@ -3,10 +3,13 @@ import { getAllCamps, addCamp, getCampByName, deleteCamp, updateCamp, subscribeT
 import { Trash2, Edit2, Check, X, RefreshCw } from 'lucide-react';
 
 const STOP_WORDS = new Set([
-    'oboz', 'obóz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus',
+    'oboz', 'obóz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus', 'rejs',
     'lato', 'zima', 'leni', 'zimow', 'ferie', 'wakacje',
-    'sekcja',
-    'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka', 'rejs'
+    'letni', 'letnia', 'letnie', 'zimowy', 'zimowa', 'zimowe',
+    'sportowy', 'sportowa', 'sportowe', 'sport',
+    'sekcja', 'family', 'hero', 'prokids', 'semipro', 'beeski',
+    'karnet', 'karnety', 'rata', 'doplata',
+    'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka'
 ]);
 
 const CHAR_MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z',
