@@ -435,33 +435,39 @@ export default function Dashboard() {
         }
     };
 
-    const handleCategoryChange = (id, newCategory) => {
-        // Optimistic: update UI instantly, save in background
-        setTransactions(prev => prev.map(t => t.id === id ? { ...t, category: newCategory } : t));
-        updateTransaction(id, { category: newCategory });
-    };
+    const isTurystyczna = (cat) => (cat || '').toLowerCase().includes('turystyczna');
 
-    const handleCampChange = (id, newCamp) => {
-        // Optimistic: update UI instantly, save in background
-        setTransactions(prev => prev.map(t => t.id === id ? { ...t, camp: newCamp, needs_review: false } : t));
-        updateTransaction(id, { camp: newCamp, needs_review: false });
-    };
-
-    // Child transaction pending edits — stage change, confirm with ✓ or cancel with ×
-    const handleChildFieldChange = (id, field, value) => {
-        setPendingEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } }));
+    // Stage a field change — shows ✓/× before saving to DB
+    // If category changes away from turystyczna → auto-clear camp
+    const handlePendingChange = (id, field, value) => {
+        setPendingEdits(prev => {
+            const current = prev[id] || {};
+            const updated = { ...current, [field]: value };
+            // Auto-clear camp when category is no longer turystyczna
+            if (field === 'category' && !isTurystyczna(value)) {
+                updated.camp = '';
+            }
+            return { ...prev, [id]: updated };
+        });
     };
 
     const handleCommitEdit = (id) => {
         const edits = pendingEdits[id];
         if (!edits) return;
-        setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...edits } : t));
-        updateTransaction(id, edits);
+        const updates = { ...edits, needs_review: false };
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+        updateTransaction(id, updates);
         setPendingEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
     };
 
     const handleCancelEdit = (id) => {
         setPendingEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
+    };
+
+    // Direct camp change without pending (e.g. bulk ops)
+    const handleCampChange = (id, newCamp) => {
+        setTransactions(prev => prev.map(t => t.id === id ? { ...t, camp: newCamp, needs_review: false } : t));
+        updateTransaction(id, { camp: newCamp, needs_review: false });
     };
 
     const getCategoryStyle = (cat) => {
@@ -887,68 +893,88 @@ export default function Dashboard() {
                                     <td>
                                         {children.length > 0 ? (
                                             <span style={{ color: '#A3AED0', fontSize: '12px', fontStyle: 'italic' }}>— podzielona —</span>
-                                        ) : (
-                                        <select
-                                            value={t.category || ''}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                if (selectedIds.has(t.id) && selectedIds.size > 1) {
-                                                    if (window.confirm(`Zmienić kategorię na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
-                                                        handleBulkCategory(val);
-                                                        return;
-                                                    }
-                                                }
-                                                handleCategoryChange(t.id, val);
-                                            }}
-                                            className="category-select"
-                                            style={{
-                                                ...getCategoryStyle(t.category),
-                                                ...(!t.category ? { color: '#EE5D50', fontWeight: 600 } : {})
-                                            }}
-                                        >
-                                            <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
-                                            {categories?.map(c => (
-                                                <option key={c.id} value={c.name}>{c.name}</option>
-                                            ))}
-                                            <option value="Koszt">Koszt</option>
-                                            <option value="Zwrot">Zwrot</option>
-                                        </select>
-                                        )}
+                                        ) : (() => {
+                                            const pendingCat = pendingEdits[t.id]?.category;
+                                            const displayCat = pendingCat !== undefined ? pendingCat : (t.category || '');
+                                            const hasPending = pendingEdits[t.id] !== undefined;
+                                            return (
+                                                <select
+                                                    value={displayCat}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        if (selectedIds.has(t.id) && selectedIds.size > 1) {
+                                                            if (window.confirm(`Zmienić kategorię na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
+                                                                handleBulkCategory(val);
+                                                                return;
+                                                            }
+                                                        }
+                                                        handlePendingChange(t.id, 'category', val);
+                                                    }}
+                                                    className="category-select"
+                                                    style={{
+                                                        ...getCategoryStyle(displayCat),
+                                                        ...(!displayCat ? { color: '#EE5D50', fontWeight: 600 } : {}),
+                                                        ...(hasPending && pendingCat !== undefined ? { border: '2px solid #4318FF' } : {})
+                                                    }}
+                                                >
+                                                    <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
+                                                    {categories?.map(c => (
+                                                        <option key={c.id} value={c.name}>{c.name}</option>
+                                                    ))}
+                                                    <option value="Koszt">Koszt</option>
+                                                    <option value="Zwrot">Zwrot</option>
+                                                </select>
+                                            );
+                                        })()}
                                     </td>
                                     <td>
                                         {children.length > 0 ? (
                                             <span style={{ color: '#A3AED0', fontSize: '12px', fontStyle: 'italic' }}>— podzielona —</span>
-                                        ) : (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                            <select
-                                                value={t.camp || ''}
-                                                onChange={async (e) => {
-                                                    const val = e.target.value;
-                                                    if (selectedIds.has(t.id) && selectedIds.size > 1) {
-                                                        if (window.confirm(`Zmienić wyjazd na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
-                                                            await handleBulkCamp(val);
-                                                            return;
-                                                        }
-                                                    }
-                                                    handleCampChange(t.id, val);
-                                                }}
-                                                className={`category-select ${t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
-                                                style={{ width: '120px' }}
-                                            >
-                                                <option value="">-</option>
-                                                {camps?.map(c => (
-                                                    <option key={c.id} value={c.name}>{c.name}</option>
-                                                ))}
-                                            </select>
-                                            {t.needs_review && (
-                                                <button
-                                                    className="confirm-btn"
-                                                    onClick={() => handleCampConfirm(t.id)}
-                                                    title="Zatwierdź to dopasowanie"
-                                                >✓</button>
-                                            )}
-                                        </div>
-                                        )}
+                                        ) : (() => {
+                                            const pendingCamp = pendingEdits[t.id]?.camp;
+                                            const displayCamp = pendingCamp !== undefined ? pendingCamp : (t.camp || '');
+                                            const hasPending = pendingEdits[t.id] !== undefined;
+                                            const effectiveCat = pendingEdits[t.id]?.category !== undefined ? pendingEdits[t.id].category : t.category;
+                                            return (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <select
+                                                        value={displayCamp}
+                                                        onChange={async (e) => {
+                                                            const val = e.target.value;
+                                                            if (selectedIds.has(t.id) && selectedIds.size > 1) {
+                                                                if (window.confirm(`Zmienić wyjazd na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
+                                                                    await handleBulkCamp(val);
+                                                                    return;
+                                                                }
+                                                            }
+                                                            handlePendingChange(t.id, 'camp', val);
+                                                        }}
+                                                        className={`category-select ${!hasPending && t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
+                                                        style={{
+                                                            width: '120px',
+                                                            ...(hasPending && pendingCamp !== undefined ? { border: '2px solid #4318FF' } : {}),
+                                                            ...(!isTurystyczna(effectiveCat) ? { opacity: 0.4, pointerEvents: hasPending ? 'none' : 'auto' } : {})
+                                                        }}
+                                                        disabled={!isTurystyczna(effectiveCat)}
+                                                    >
+                                                        <option value="">-</option>
+                                                        {camps?.map(c => (
+                                                            <option key={c.id} value={c.name}>{c.name}</option>
+                                                        ))}
+                                                    </select>
+                                                    {hasPending ? (
+                                                        <>
+                                                            <button onClick={() => handleCommitEdit(t.id)} title="Zatwierdź zmiany"
+                                                                style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
+                                                            <button onClick={() => handleCancelEdit(t.id)} title="Anuluj zmiany"
+                                                                style={{ background: '#A3AED0', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
+                                                        </>
+                                                    ) : t.needs_review ? (
+                                                        <button className="confirm-btn" onClick={() => handleCampConfirm(t.id)} title="Zatwierdź dopasowanie">✓</button>
+                                                    ) : null}
+                                                </div>
+                                            );
+                                        })()}
                                     </td>
                                     <td style={{ textAlign: 'center' }}>
                                         {t.note ? (
@@ -1025,7 +1051,7 @@ export default function Dashboard() {
                                         <td>
                                             <select
                                                 value={pendingEdits[child.id]?.category ?? child.category ?? ''}
-                                                onChange={e => handleChildFieldChange(child.id, 'category', e.target.value)}
+                                                onChange={e => handlePendingChange(child.id, 'category', e.target.value)}
                                                 className="category-select"
                                                 style={pendingEdits[child.id]?.category !== undefined ? { border: '2px solid #4318FF' } : {}}
                                             >
@@ -1039,7 +1065,7 @@ export default function Dashboard() {
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                                 <select
                                                     value={pendingEdits[child.id]?.camp ?? child.camp ?? ''}
-                                                    onChange={e => handleChildFieldChange(child.id, 'camp', e.target.value)}
+                                                    onChange={e => handlePendingChange(child.id, 'camp', e.target.value)}
                                                     className="category-select"
                                                     style={{ width: '100px', ...(pendingEdits[child.id]?.camp !== undefined ? { border: '2px solid #4318FF' } : {}) }}
                                                 >
