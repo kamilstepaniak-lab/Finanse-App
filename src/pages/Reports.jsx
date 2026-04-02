@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { getAllTransactions, subscribeToTransactions, unsubscribe } from '../db';
+import { getAllTransactions, getAllCamps, subscribeToTransactions, unsubscribe } from '../db';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
     PieChart, Pie, Legend, LineChart, Line, CartesianGrid, Area, AreaChart
@@ -27,6 +27,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export default function Reports() {
     const [transactions, setTransactions] = useState([]);
+    const [camps, setCamps] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const now = new Date();
@@ -45,19 +46,27 @@ export default function Reports() {
     const [campSort, setCampSort] = useState('value');
 
     useEffect(() => {
-        loadTransactions();
-        const channel = subscribeToTransactions(() => loadTransactions());
+        loadData();
+        const channel = subscribeToTransactions(() => loadData());
         return () => unsubscribe(channel);
     }, []);
 
-    const loadTransactions = async () => {
-        const data = await getAllTransactions();
-        setTransactions(data);
+    const loadData = async () => {
+        const [txData, campData] = await Promise.all([getAllTransactions(), getAllCamps()]);
+        setTransactions(txData);
+        setCamps(campData);
         setLoading(false);
     };
 
+    // Map camp name → season for quick lookup
+    const campSeasonMap = useMemo(() => {
+        const map = {};
+        (camps || []).forEach(c => { map[c.name] = c.season || ''; });
+        return map;
+    }, [camps]);
+
     const reportData = useMemo(() => {
-        if (!transactions) return { stats: {}, incomeByCategoryData: [], incomeByCampData: [], monthlyData: [], topExpenses: [] };
+        if (!transactions) return { stats: {}, incomeByCategoryData: [], incomeByCampData: [], monthlyData: [], topExpenses: [], sumLato: 0, sumZima: 0 };
 
         const filtered = transactions.filter(t => {
             if (dateFrom && t.date < dateFrom) return false;
@@ -118,18 +127,25 @@ export default function Reports() {
         const incomeByCampData = Object.keys(incomeByCampMap).map(name => ({
             name,
             value: incomeByCampMap[name],
-            eurValue: incomeEURByCampMap[name] || 0
+            eurValue: incomeEURByCampMap[name] || 0,
+            season: campSeasonMap[name] || ''
         }))
             .sort((a, b) => b.value - a.value);
+
+        // Season totals (only camps with assigned season)
+        const sumLato = incomeByCampData.filter(c => c.season === 'lato').reduce((s, c) => s + c.value, 0);
+        const sumZima = incomeByCampData.filter(c => c.season === 'zima').reduce((s, c) => s + c.value, 0);
 
         return {
             stats: { income, expense, balance: income - expense, incomeEUR, expenseEUR },
             incomeByCategoryData,
             incomeByCampData,
             monthlyData,
-            topExpenses
+            topExpenses,
+            sumLato,
+            sumZima
         };
-    }, [transactions, dateFrom, dateTo]);
+    }, [transactions, dateFrom, dateTo, campSeasonMap]);
 
     if (loading) return <div className="reports-loading">Pobieranie danych finansowych...</div>;
 
@@ -257,27 +273,39 @@ export default function Reports() {
                     <div className="chart-header-row">
                         <h3><TrendingUp size={17} style={{ color: '#059669', marginRight: 8, verticalAlign: 'middle' }} />Przychody wg. Wyjazdów</h3>
                         <div className="sort-controls">
-                            <button
-                                className={`sort-btn${campSort === 'value' ? ' active' : ''}`}
-                                onClick={() => setCampSort('value')}
-                            >
+                            <button className={`sort-btn${campSort === 'value' ? ' active' : ''}`} onClick={() => setCampSort('value')}>
                                 <ArrowDownUp size={13} /> Wg. kwoty
                             </button>
-                            <button
-                                className={`sort-btn${campSort === 'name' ? ' active' : ''}`}
-                                onClick={() => setCampSort('name')}
-                            >
+                            <button className={`sort-btn${campSort === 'name' ? ' active' : ''}`} onClick={() => setCampSort('name')}>
                                 <ArrowUpDown size={13} /> Wg. nazwy
                             </button>
                         </div>
                     </div>
+
+                    {/* Season summary blocks */}
+                    <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '200px', background: 'linear-gradient(135deg,#FEF3C7,#FDE68A)', borderRadius: '12px', padding: '18px 24px', border: '1px solid #FCD34D' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#92400E', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>☀️ Obozy Letnie</div>
+                            <div style={{ fontSize: '26px', fontWeight: 800, color: '#B45309' }}>
+                                {reportData.sumLato.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
+                            </div>
+                        </div>
+                        <div style={{ flex: 1, minWidth: '200px', background: 'linear-gradient(135deg,#EFF6FF,#BFDBFE)', borderRadius: '12px', padding: '18px 24px', border: '1px solid #93C5FD' }}>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1E40AF', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>❄️ Obozy Zimowe</div>
+                            <div style={{ fontSize: '26px', fontWeight: 800, color: '#1570EF' }}>
+                                {reportData.sumZima.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="table-responsive">
                         <table className="data-table">
                             <thead>
                                 <tr>
                                     <th>Wyjazd</th>
+                                    <th>Sezon</th>
                                     <th>Przychód (PLN)</th>
-                                    <th>W tym wpłaty w EUR (wliczone w kolumnę PLN)</th>
+                                    <th>W tym EUR</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -286,6 +314,11 @@ export default function Reports() {
                                     .map((item, idx) => (
                                     <tr key={idx}>
                                         <td>{item.name}</td>
+                                        <td>
+                                            {item.season === 'lato' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#FEF3C7', color: '#B45309', borderRadius: '6px', padding: '2px 8px' }}>☀️ Lato</span>}
+                                            {item.season === 'zima' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#EFF6FF', color: '#1570EF', borderRadius: '6px', padding: '2px 8px' }}>❄️ Zima</span>}
+                                            {!item.season && <span style={{ fontSize: '11px', color: '#94A3B8' }}>—</span>}
+                                        </td>
                                         <td className="pos fw-bold">{item.value.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
                                         <td className="text-muted">
                                             {item.eurValue > 0 ? `${item.eurValue.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} EUR` : '-'}
@@ -293,7 +326,7 @@ export default function Reports() {
                                     </tr>
                                 ))}
                                 {reportData.incomeByCampData.length === 0 && (
-                                    <tr><td colSpan="3" className="text-center">Brak przychodów w wybranym okresie</td></tr>
+                                    <tr><td colSpan="4" className="text-center">Brak przychodów w wybranym okresie</td></tr>
                                 )}
                             </tbody>
                         </table>
