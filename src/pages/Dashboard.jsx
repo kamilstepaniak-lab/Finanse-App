@@ -438,30 +438,56 @@ export default function Dashboard() {
     const isTurystyczna = (cat) => (cat || '').toLowerCase().includes('turystyczna');
 
     // Stage a field change — shows ✓/× before saving to DB
-    // If category changes away from turystyczna → auto-clear camp
+    // If multiple rows selected, stages for ALL selected. Auto-clears camp when category ≠ turystyczna.
     const handlePendingChange = (id, field, value) => {
+        const idsToUpdate = (selectedIds.has(id) && selectedIds.size > 1)
+            ? Array.from(selectedIds)
+            : [id];
+
         setPendingEdits(prev => {
-            const current = prev[id] || {};
-            const updated = { ...current, [field]: value };
-            // Auto-clear camp when category is no longer turystyczna
-            if (field === 'category' && !isTurystyczna(value)) {
-                updated.camp = '';
-            }
-            return { ...prev, [id]: updated };
+            const next = { ...prev };
+            idsToUpdate.forEach(tid => {
+                const current = next[tid] || {};
+                const updated = { ...current, [field]: value };
+                if (field === 'category' && !isTurystyczna(value)) {
+                    updated.camp = '';
+                }
+                next[tid] = updated;
+            });
+            return next;
         });
     };
 
+    // Commit pending edits for id — if id is in selectedIds, commits ALL selected
     const handleCommitEdit = (id) => {
-        const edits = pendingEdits[id];
-        if (!edits) return;
-        const updates = { ...edits, needs_review: false };
-        setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
-        updateTransaction(id, updates);
-        setPendingEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
+        const idsToCommit = (selectedIds.has(id) && selectedIds.size > 1)
+            ? Array.from(selectedIds)
+            : [id];
+
+        setPendingEdits(prev => {
+            const next = { ...prev };
+            idsToCommit.forEach(tid => {
+                const edits = next[tid];
+                if (!edits) return;
+                const updates = { ...edits, needs_review: false };
+                setTransactions(p => p.map(t => t.id === tid ? { ...t, ...updates } : t));
+                updateTransaction(tid, updates);
+                delete next[tid];
+            });
+            return next;
+        });
+        if (selectedIds.has(id) && selectedIds.size > 1) setSelectedIds(new Set());
     };
 
     const handleCancelEdit = (id) => {
-        setPendingEdits(prev => { const n = { ...prev }; delete n[id]; return n; });
+        const idsToCancel = (selectedIds.has(id) && selectedIds.size > 1)
+            ? Array.from(selectedIds)
+            : [id];
+        setPendingEdits(prev => {
+            const next = { ...prev };
+            idsToCancel.forEach(tid => delete next[tid]);
+            return next;
+        });
     };
 
     // Direct camp change without pending (e.g. bulk ops)
@@ -486,6 +512,9 @@ export default function Dashboard() {
         return acc;
     }, {});
 
+    // Set of IDs that are split parents — these should never show as needs_review
+    const splitParentIds = new Set(Object.keys(childrenByParent));
+
     const filteredTransactions = transactions?.filter(t => {
         if (t.parent_id) return false; // sub-transactions shown inline under parent
 
@@ -503,8 +532,8 @@ export default function Dashboard() {
 
         if (filterCategory && t.category !== filterCategory) return false;
         if (filterCamp && t.camp !== filterCamp) return false;
-        if (filterReview === 'uncertain' && !(t.needs_review && t.camp)) return false;
-        if (filterReview === 'missing' && !(t.needs_review && !t.camp)) return false;
+        if (filterReview === 'uncertain' && !(t.needs_review && t.camp && !splitParentIds.has(t.id))) return false;
+        if (filterReview === 'missing' && !(t.needs_review && !t.camp && !splitParentIds.has(t.id))) return false;
 
         return true;
     }).sort((a, b) => {
@@ -573,7 +602,6 @@ export default function Dashboard() {
 
     // KPI stats — based on filtered transactions (respects all active filters)
     // Split parents are excluded; their children are included individually (with same filters applied)
-    const splitParentIds = new Set(Object.keys(childrenByParent));
     const kpiParents = (filteredTransactions || []).filter(t => !splitParentIds.has(t.id));
     const kpiChildren = (transactions || []).filter(t => {
         if (!t.parent_id) return false;
@@ -659,7 +687,7 @@ export default function Dashboard() {
                         style={{ borderColor: '#F59E0B', color: filterReview === 'uncertain' ? '#fff' : '#92400E', background: filterReview === 'uncertain' ? '#F59E0B' : 'transparent' }}
                     >
                         <span className="review-dot" style={{ background: '#F59E0B' }} />
-                        Do przejrzenia ({transactions.filter(t => t.needs_review && t.camp).length})
+                        Do przejrzenia ({transactions.filter(t => !splitParentIds.has(t.id) && t.needs_review && t.camp).length})
                     </button>
                     <button
                         className={`review-btn ${filterReview === 'missing' ? 'active' : ''}`}
@@ -668,7 +696,7 @@ export default function Dashboard() {
                         style={{ borderColor: '#EE5D50', color: filterReview === 'missing' ? '#fff' : '#991B1B', background: filterReview === 'missing' ? '#EE5D50' : 'transparent' }}
                     >
                         <span className="review-dot" style={{ background: '#EE5D50' }} />
-                        Bez obozu ({transactions.filter(t => t.needs_review && !t.camp).length})
+                        Bez obozu ({transactions.filter(t => !splitParentIds.has(t.id) && t.needs_review && !t.camp).length})
                     </button>
                     <div className="filter-spacer" />
                     <div className="filter-field-group">
@@ -851,7 +879,7 @@ export default function Dashboard() {
                                 const requiresCampSub = (cat) => cat && cat.toLowerCase().includes('usługa turystyczna');
                                 return (
                             <React.Fragment key={t.id}>
-                                <tr className={t.needs_review ? (t.camp ? 'needs-review-uncertain' : 'needs-review-missing') : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
+                                <tr className={!splitParentIds.has(t.id) && t.needs_review ? (t.camp ? 'needs-review-uncertain' : 'needs-review-missing') : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
                                     <td style={{ padding: '4px 8px', textAlign: 'center' }}>
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                                             {children.length > 0 && (
@@ -900,16 +928,7 @@ export default function Dashboard() {
                                             return (
                                                 <select
                                                     value={displayCat}
-                                                    onChange={(e) => {
-                                                        const val = e.target.value;
-                                                        if (selectedIds.has(t.id) && selectedIds.size > 1) {
-                                                            if (window.confirm(`Zmienić kategorię na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
-                                                                handleBulkCategory(val);
-                                                                return;
-                                                            }
-                                                        }
-                                                        handlePendingChange(t.id, 'category', val);
-                                                    }}
+                                                    onChange={(e) => handlePendingChange(t.id, 'category', e.target.value)}
                                                     className="category-select"
                                                     style={{
                                                         ...getCategoryStyle(displayCat),
@@ -939,15 +958,8 @@ export default function Dashboard() {
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                                     <select
                                                         value={displayCamp}
-                                                        onChange={async (e) => {
-                                                            const val = e.target.value;
-                                                            if (selectedIds.has(t.id) && selectedIds.size > 1) {
-                                                                if (window.confirm(`Zmienić wyjazd na "${val}" dla ${selectedIds.size} zaznaczonych elementów?`)) {
-                                                                    await handleBulkCamp(val);
-                                                                    return;
-                                                                }
-                                                            }
-                                                            handlePendingChange(t.id, 'camp', val);
+                                                        onChange={(e) => {
+                                                            handlePendingChange(t.id, 'camp', e.target.value);
                                                         }}
                                                         className={`category-select ${!hasPending && t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
                                                         style={{
