@@ -299,10 +299,19 @@ export default function Dashboard() {
 
     const handleDeleteSub = async (id) => {
         if (window.confirm('Usunąć tę podtransakcję?')) {
-            // Optimistic: remove instantly from UI
+            const backup = transactions.find(t => t.id === id);
             setTransactions(prev => prev.filter(t => t.id !== id));
-            // Hard delete from DB (children don't need soft-delete)
-            deleteTransaction(id);
+            try {
+                // Try hard delete first, fall back to soft-delete if it fails
+                await deleteTransaction(id);
+            } catch (err) {
+                try {
+                    await deleteTransactions([id]); // soft-delete fallback
+                } catch (err2) {
+                    if (backup) setTransactions(prev => [...prev, backup]);
+                    alert('Błąd usuwania: ' + err2.message);
+                }
+            }
         }
     };
 
