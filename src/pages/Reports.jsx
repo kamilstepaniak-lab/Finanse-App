@@ -245,6 +245,16 @@ export default function Reports() {
                         <span>Przychody</span>
                         <h3>{reportData.stats.income.toLocaleString()} PLN</h3>
                         <small>{reportData.stats.incomeEUR.toLocaleString()} EUR</small>
+                        {(reportData.sumLato > 0 || reportData.sumZima > 0) && (
+                            <div style={{ display: 'flex', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '12px', background: '#FEF3C7', color: '#B45309', borderRadius: '6px', padding: '2px 8px', fontWeight: 600 }}>
+                                    ☀️ {reportData.sumLato.toLocaleString('pl-PL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} PLN
+                                </span>
+                                <span style={{ fontSize: '12px', background: '#EFF6FF', color: '#1570EF', borderRadius: '6px', padding: '2px 8px', fontWeight: 600 }}>
+                                    ❄️ {reportData.sumZima.toLocaleString('pl-PL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} PLN
+                                </span>
+                            </div>
+                        )}
                     </div>
                 </div>
                 <div className="kpi-card expense">
@@ -282,21 +292,6 @@ export default function Reports() {
                         </div>
                     </div>
 
-                    {/* Season summary blocks */}
-                    <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
-                        <div style={{ flex: 1, minWidth: '200px', background: 'linear-gradient(135deg,#FEF3C7,#FDE68A)', borderRadius: '12px', padding: '18px 24px', border: '1px solid #FCD34D' }}>
-                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#92400E', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>☀️ Obozy Letnie</div>
-                            <div style={{ fontSize: '26px', fontWeight: 800, color: '#B45309' }}>
-                                {reportData.sumLato.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
-                            </div>
-                        </div>
-                        <div style={{ flex: 1, minWidth: '200px', background: 'linear-gradient(135deg,#EFF6FF,#BFDBFE)', borderRadius: '12px', padding: '18px 24px', border: '1px solid #93C5FD' }}>
-                            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1E40AF', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>❄️ Obozy Zimowe</div>
-                            <div style={{ fontSize: '26px', fontWeight: 800, color: '#1570EF' }}>
-                                {reportData.sumZima.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN
-                            </div>
-                        </div>
-                    </div>
 
                     <div className="table-responsive">
                         <table className="data-table">
