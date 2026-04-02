@@ -1031,27 +1031,46 @@ export default function Dashboard() {
                                             {child.amount?.toFixed(2)} PLN
                                         </td>
                                         <td>
-                                            <select
-                                                value={child.category || ''}
-                                                onChange={e => updateTransaction(child.id, { category: e.target.value })}
-                                                className="category-select"
-                                            >
-                                                <option value="">-- Wybierz --</option>
-                                                {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                                <option value="Koszt">Koszt</option>
-                                                <option value="Zwrot">Zwrot</option>
-                                            </select>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <select
+                                                    value={pendingEdits[child.id]?.category ?? child.category ?? ''}
+                                                    onChange={e => handleCategoryChange(child.id, e.target.value)}
+                                                    className="category-select"
+                                                    style={pendingEdits[child.id]?.category !== undefined ? { border: '2px solid #4318FF' } : {}}
+                                                >
+                                                    <option value="">-- Wybierz --</option>
+                                                    {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                    <option value="Koszt">Koszt</option>
+                                                    <option value="Zwrot">Zwrot</option>
+                                                </select>
+                                            </div>
                                         </td>
                                         <td>
-                                            <select
-                                                value={child.camp || ''}
-                                                onChange={e => updateTransaction(child.id, { camp: e.target.value })}
-                                                className="category-select"
-                                                style={{ width: '120px' }}
-                                            >
-                                                <option value="">-</option>
-                                                {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                            </select>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <select
+                                                    value={pendingEdits[child.id]?.camp ?? child.camp ?? ''}
+                                                    onChange={e => handleCampChange(child.id, e.target.value)}
+                                                    className="category-select"
+                                                    style={{ width: '110px', ...(pendingEdits[child.id]?.camp !== undefined ? { border: '2px solid #4318FF' } : {}) }}
+                                                >
+                                                    <option value="">-</option>
+                                                    {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                </select>
+                                                {pendingEdits[child.id] ? (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleCommitEdit(child.id)}
+                                                            title="Zatwierdź"
+                                                            style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                                        >✓</button>
+                                                        <button
+                                                            onClick={() => handleCancelEdit(child.id)}
+                                                            title="Anuluj"
+                                                            style={{ background: '#EE5D50', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                                        >×</button>
+                                                    </>
+                                                ) : null}
+                                            </div>
                                         </td>
                                         <td style={{ textAlign: 'center' }}>
                                             <button
