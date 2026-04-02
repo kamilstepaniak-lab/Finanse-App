@@ -622,7 +622,9 @@ export default function Dashboard() {
     // KPI stats — based on filtered transactions (respects all active filters)
     // Split parents are excluded; their children are included individually (with same filters applied)
     const kpiParents = (filteredTransactions || []).filter(t => !splitParentIds.has(t.id));
-    const kpiChildren = (transactions || []).filter(t => {
+    // Children are only counted when no review filter is active
+    // (review filter targets parent transactions — adding children would inflate KPI)
+    const kpiChildren = filterReview ? [] : (transactions || []).filter(t => {
         if (!t.parent_id) return false;
         if (filterCamp && t.camp !== filterCamp) return false;
         if (filterCategory && t.category !== filterCategory) return false;
