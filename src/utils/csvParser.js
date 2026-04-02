@@ -108,8 +108,8 @@ export const normalizeTransaction = async (row, camps = []) => {
         const lower = txt.toLowerCase();
 
         if (
-            lower.includes('plywania') ||
-            lower.includes('pływania') ||
+            lower.includes('plywani') ||
+            lower.includes('pływani') ||
             lower.includes('basen') ||
             lower.includes('pływalnia') ||
             lower.includes('awf') ||
@@ -117,6 +117,15 @@ export const normalizeTransaction = async (row, camps = []) => {
             lower.includes('akf') ||
             /\bup\b/.test(lower)
         ) return 'nauka pływania';
+
+        // Dzień tygodnia + godzina (np. "środa 19.30", "niedziela 18:45") → nauka pływania
+        // Usuń spacje i sprawdź też wariant z literówką (np. "n iedziela")
+        const lowerNoSpaces = lower.replace(/\s+/g, '');
+        const daysOfWeek = ['poniedzialek', 'wtorek', 'sroda', 'czwartek', 'piatek', 'sobota', 'niedziela',
+                            'poniedzialek', 'sroda', 'piatek'];
+        const hasDay = daysOfWeek.some(d => lower.includes(d) || lowerNoSpaces.includes(d));
+        const hasTime = /\d{1,2}[.,:]\d{2}/.test(lower);
+        if (hasDay && hasTime) return 'nauka pływania';
 
         if (
             lower.includes('trening') ||
@@ -136,6 +145,9 @@ export const normalizeTransaction = async (row, camps = []) => {
             lower.includes('kwatera') ||
             lower.includes('zakwaterowanie') ||
             lower.includes('camp') ||
+            lower.includes('rejs') ||
+            lower.includes('zeglarski') ||
+            lower.includes('żeglarski') ||
             lower.includes('gniewino') ||
             lower.includes('borek') ||
             lower.includes('chotowa') ||
@@ -169,9 +181,19 @@ export const normalizeTransaction = async (row, camps = []) => {
 
         // Stop-words that appear in camp names but carry no matching value
         const STOP_WORDS = new Set([
-            'oboz', 'obóz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus',
+            'oboz', 'oboz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus', 'rejs',
             'lato', 'zima', 'leni', 'zimow', 'ferie', 'wakacje',
-            'dla', 'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka'
+            // przymiotniki obozowe — nie pojawiają się w tytułach przelewów
+            'letni', 'letnia', 'letnie', 'zimowy', 'zimowa', 'zimowe',
+            'sportowy', 'sportowa', 'sportowe', 'sport',
+            'morski', 'morska', 'gorski', 'gorska',
+            'narciarski', 'narciarska', 'narciarski',
+            'mlodziezowy', 'mlodziezowa', 'mlodziezowe',
+            'jezdziecki', 'taneczny', 'muzyczny', 'artystyczny',
+            // organizacyjne
+            'sekcja',
+            // ogólne słowa płatnicze
+            'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka', 'udzial', 'uczestnictwo'
         ]);
 
         // Extract words >= 3 chars that are not stop-words.
@@ -220,18 +242,26 @@ export const normalizeTransaction = async (row, camps = []) => {
         };
 
         const tNorm = norm(textToSearch);
+        const tNormNoSpaces = tNorm.replace(/\s+/g, '');
         const tTokens = extractTokens(textToSearch);
         const tDates = extractDates(textToSearch);
 
         let bestMatch = '';
         let highestScore = 0;
+        let bestHadTagBonus = false;
+        let bestTokenRatio = 0;
+        let bestHasAnyMatch = false;
         let isTie = false;
 
         for (const c of campsList) {
             const cTokens = extractTokens(c.name);
             const cDates = extractDates(c.name);
 
-            if (cTokens.length === 0 && (!c.tags || c.tags.length === 0)) continue;
+            // Tags unique to the camp (exclude ones already in cTokens to avoid double-counting)
+            const campTags = (c.tags || []).map(t => norm(t)).filter(t => t.length >= 2);
+            const extraTags = campTags.filter(t => !cTokens.includes(t));
+
+            if (cTokens.length === 0 && extraTags.length === 0) continue;
 
             let matchingTokens = 0;
 
@@ -252,38 +282,50 @@ export const normalizeTransaction = async (row, camps = []) => {
             let dateBonus = 0;
             for (const d of cDates) {
                 if (tDates.has(d)) {
-                    dateBonus += 1; // counts as an extra matched token
+                    dateBonus += 1;
                 }
             }
 
-            // Tag bonus: user-defined keywords — each matching tag is a strong signal
-            const campTags = (c.tags || []).map(t => norm(t)).filter(t => t.length >= 2);
+            // Tag bonus: extra tags (not already in name tokens) — also check without spaces for typos
             let tagBonus = 0;
-            for (const tag of campTags) {
-                if (tNorm.includes(tag)) {
-                    tagBonus += 2; // tags are stronger signal than regular tokens
+            for (const tag of extraTags) {
+                if (tNorm.includes(tag) || tNormNoSpaces.includes(tag)) {
+                    tagBonus += 2;
                 }
             }
 
-            const totalItems = cTokens.length + cDates.size + campTags.length * 2;
+            // Also check cTokens against no-spaces version (catches typos like "Choto wa")
+            for (const token of cTokens) {
+                if (!tTokens.includes(token) && tNormNoSpaces.includes(token)) {
+                    matchingTokens += 0.8;
+                }
+            }
+
+            const totalItems = cTokens.length + cDates.size + extraTags.length * 2;
             const score = totalItems > 0 ? (matchingTokens + dateBonus + tagBonus) / totalItems : 0;
+            const tokenMatchRatio = cTokens.length > 0 ? matchingTokens / cTokens.length : 0;
+            const hasAnyMatch = matchingTokens > 0 || dateBonus > 0 || tagBonus > 0;
 
             if (score > highestScore) {
                 highestScore = score;
                 bestMatch = c.name;
+                bestHadTagBonus = tagBonus > 0;
+                bestTokenRatio = tokenMatchRatio;
+                bestHasAnyMatch = hasAnyMatch;
                 isTie = false;
             } else if (Math.abs(score - highestScore) < 0.001 && score > 0) {
                 isTie = true;
             }
         }
 
-        // Tie → no assignment (ambiguous)
-        if (isTie || !bestMatch) return { camp: '', needsReview: true };
+        if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
-        // score >= 0.6 → certain match
-        // score 0.3–0.59 → assigned but flagged for review (red)
-        // score < 0.3 → no assignment
-        if (highestScore >= 0.6) return { camp: bestMatch, needsReview: false };
+        // Certain match: no tie AND at least one keyword hit
+        // System uses all keywords (name tokens + tags) — any unique match is enough
+        const isCertain = !isTie && bestHasAnyMatch;
+
+        // Tie: still assign best candidate but always flag for review
+        if (isCertain) return { camp: bestMatch, needsReview: false };
         if (highestScore >= 0.3) return { camp: bestMatch, needsReview: true };
         return { camp: '', needsReview: true };
     };
