@@ -472,10 +472,13 @@ export default function Dashboard() {
             idsToCommit.forEach(tid => {
                 const edits = next[tid];
                 if (!edits) return;
-                const updates = { ...edits, needs_review: false };
+                // If camp is empty after edit → mark as needs_review so it shows red for office staff
+                const finalCamp = 'camp' in edits ? edits.camp : undefined;
+                const needsReview = finalCamp !== undefined ? !finalCamp : false;
+                const updates = { ...edits, needs_review: needsReview };
                 setTransactions(p => {
                     const tx = p.find(t => t.id === tid);
-                    if (tx?.parent_id) parentIdsToClear.add(tx.parent_id);
+                    if (tx?.parent_id && !needsReview) parentIdsToClear.add(tx.parent_id);
                     return p.map(t => t.id === tid ? { ...t, ...updates } : t);
                 });
                 updateTransaction(tid, updates);
