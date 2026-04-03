@@ -93,11 +93,12 @@ export default function Reports() {
             return true;
         }).sort((a, b) => a.date.localeCompare(b.date));
 
-        // Basic Stats
-        const income = filtered.filter(t => t.amount > 0).reduce((acc, t) => acc + t.amount, 0);
+        // Basic Stats — Zwrot excluded from income (shown separately)
+        const income = filtered.filter(t => t.amount > 0 && t.category !== 'Zwrot').reduce((acc, t) => acc + t.amount, 0);
         const expense = filtered.filter(t => t.amount < 0).reduce((acc, t) => acc + Math.abs(t.amount), 0);
+        const zwrot = filtered.filter(t => t.amount > 0 && t.category === 'Zwrot').reduce((acc, t) => acc + t.amount, 0);
 
-        const incomeEUR = filtered.filter(t => t.amount > 0 && t.currency === 'EUR')
+        const incomeEUR = filtered.filter(t => t.amount > 0 && t.category !== 'Zwrot' && t.currency === 'EUR')
             .reduce((acc, t) => acc + (t.original_amount || 0), 0);
         const expenseEUR = filtered.filter(t => t.amount < 0 && t.currency === 'EUR')
             .reduce((acc, t) => acc + Math.abs(t.original_amount || 0), 0);
@@ -156,7 +157,7 @@ export default function Reports() {
         const sumZima = incomeByCampData.filter(c => c.season === 'zima').reduce((s, c) => s + c.value, 0);
 
         return {
-            stats: { income, expense, balance: income - expense, incomeEUR, expenseEUR },
+            stats: { income, expense, balance: income - expense, incomeEUR, expenseEUR, zwrot },
             incomeByCategoryData,
             incomeByCampData,
             monthlyData,
@@ -264,6 +265,9 @@ export default function Reports() {
                         <span>Przychody</span>
                         <h3>{reportData.stats.income.toLocaleString()} PLN</h3>
                         <small>{reportData.stats.incomeEUR.toLocaleString()} EUR</small>
+                        {reportData.stats.zwrot > 0 && (
+                            <small style={{ color: '#7C3AED', fontWeight: 600 }}>zwroty: {reportData.stats.zwrot.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</small>
+                        )}
                     </div>
                 </div>
                 <div className="kpi-card expense">
