@@ -218,8 +218,8 @@ export default function Dashboard() {
 
                 const updates = { needs_review: false };
 
-                // Only assign camp if category requires it
-                if (!requiresCamp(normalizedResult.category || t.category)) {
+                // Only assign camp if category requires it — prefer existing DB category over auto-assign suggestion
+                if (!requiresCamp(t.category || normalizedResult.category)) {
                     await updateTransaction(t.id, updates);
                     continue;
                 }
