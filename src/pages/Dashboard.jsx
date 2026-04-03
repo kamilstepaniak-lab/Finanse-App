@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 import {
     getAllTransactions,
     getAllCategories,
@@ -298,20 +299,11 @@ export default function Dashboard() {
     };
 
     const handleDeleteSub = async (id) => {
-        if (window.confirm('Usunąć tę podtransakcję?')) {
-            const backup = transactions.find(t => t.id === id);
-            setTransactions(prev => prev.filter(t => t.id !== id));
-            try {
-                // Try hard delete first, fall back to soft-delete if it fails
-                await deleteTransaction(id);
-            } catch (err) {
-                try {
-                    await deleteTransactions([id]); // soft-delete fallback
-                } catch (err2) {
-                    if (backup) setTransactions(prev => [...prev, backup]);
-                    alert('Błąd usuwania: ' + err2.message);
-                }
-            }
+        setTransactions(prev => prev.filter(t => t.id !== id));
+        const { error } = await supabase.from('transactions').delete().eq('id', id);
+        if (error) {
+            console.error('Delete sub error:', error);
+            await loadTransactions(); // reload to restore if failed
         }
     };
 
