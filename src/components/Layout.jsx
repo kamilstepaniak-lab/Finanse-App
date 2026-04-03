@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, PieChart, Settings, Tent, Search, Download, ReceiptText, RotateCcw } from 'lucide-react';
+import { LayoutDashboard, PieChart, Settings, Tent, Search, Download, ReceiptText, RotateCcw, History } from 'lucide-react';
 import './Layout.css';
 
 const SidebarItem = ({ to, icon: Icon, label }) => {
@@ -27,6 +27,7 @@ export default function Layout() {
             case '/camps': return 'Wyjazdy';
             case '/vat-marza': return 'VAT Marża';
             case '/zwroty': return 'Zwroty';
+            case '/historia': return 'Historia';
             default: return 'Finance';
         }
     };
@@ -46,6 +47,7 @@ export default function Layout() {
                     <SidebarItem to="/camps" icon={Tent} label="Wyjazdy" />
                     <SidebarItem to="/vat-marza" icon={ReceiptText} label="VAT Marża" />
                     <SidebarItem to="/zwroty" icon={RotateCcw} label="Zwroty" />
+                    <SidebarItem to="/historia" icon={History} label="Historia" />
                 </div>
 
                 <div className="nav-footer">

@@ -207,17 +207,16 @@ export default function Dashboard() {
             let updatedCount = 0;
             const requiresCamp = (category) => category && category.toLowerCase().includes('usługa turystyczna');
 
-            const unassigned = transactions.filter(t => !t.camp || t.camp.trim() === '' || t.needs_review);
+            const unassigned = transactions.filter(t =>
+                !t.parent_id &&           // pomijaj dzieci podziałów
+                t.needs_review !== false  // pomijaj potwierdzone (needs_review=false)
+            );
 
             for (const t of unassigned) {
                 const mockedRow = [t.date, t.amount, t.currency || 'PLN', t.sender, t.title];
                 const normalizedResult = await normalizeTransaction(mockedRow, camps);
 
-                // Always apply re-categorization — fixes old transactions imported with wrong category
                 const updates = { needs_review: false };
-                if (normalizedResult.category && normalizedResult.category !== t.category) {
-                    updates.category = normalizedResult.category;
-                }
 
                 // Only assign camp if category requires it
                 if (!requiresCamp(normalizedResult.category || t.category)) {
@@ -389,6 +388,17 @@ export default function Dashboard() {
             }
 
             await addTransactions(newTransactions);
+
+            const log = JSON.parse(localStorage.getItem('activity_log') || '[]');
+            log.unshift({
+                type: 'csv_import',
+                message: `Zaimportowano plik: ${file.name}`,
+                details: `${newTransactions.length} nowych transakcji`,
+                timestamp: new Date().toISOString()
+            });
+            // Keep only last 200 entries
+            localStorage.setItem('activity_log', JSON.stringify(log.slice(0, 200)));
+
             await loadTransactions();
 
             if (newTransactions.length < formattedData.length) {

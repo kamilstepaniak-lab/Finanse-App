@@ -257,6 +257,7 @@ export const normalizeTransaction = async (row, camps = []) => {
         let bestHasAnyMatch = false;
         let isTie = false;
         let tieCandidates = []; // track all camps with equal top score for date tie-breaking
+        let significantCamps = 0;
 
         for (const c of campsList) {
             const cTokens = extractTokens(c.name);
@@ -311,6 +312,8 @@ export const normalizeTransaction = async (row, camps = []) => {
             const tokenMatchRatio = cTokens.length > 0 ? matchingTokens / cTokens.length : 0;
             const hasAnyMatch = matchingTokens > 0 || dateBonus > 0 || tagBonus > 0;
 
+            if (score > 0.15 && hasAnyMatch) significantCamps++;
+
             if (score > highestScore) {
                 highestScore = score;
                 bestMatch = c.name;
@@ -324,6 +327,8 @@ export const normalizeTransaction = async (row, camps = []) => {
                 tieCandidates.push({ name: c.name, cDates });
             }
         }
+
+        if (significantCamps >= 3) return { camp: '', needsReview: true };
 
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
