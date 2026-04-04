@@ -483,9 +483,11 @@ export default function Dashboard() {
             idsToCommit.forEach(tid => {
                 const edits = next[tid];
                 if (!edits) return;
-                // If camp is empty after edit → mark as needs_review so it shows red for office staff
+                // If camp is empty after edit AND category requires a camp → mark as needs_review
                 const finalCamp = 'camp' in edits ? edits.camp : undefined;
-                const needsReview = finalCamp !== undefined ? !finalCamp : false;
+                const finalCategory = 'category' in edits ? edits.category : transactions.find(t => t.id === tid)?.category;
+                const campRequired = isTurystyczna(finalCategory);
+                const needsReview = campRequired ? (finalCamp !== undefined ? !finalCamp : false) : false;
                 const updates = { ...edits, needs_review: needsReview };
                 setTransactions(p => {
                     const tx = p.find(t => t.id === tid);
