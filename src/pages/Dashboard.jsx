@@ -11,13 +11,14 @@ import {
     deleteTransactions,
     getAllTransactionsIncludingDeleted,
     clearAllTransactions,
+    logActivity,
     subscribeToTransactions,
     subscribeToCategories,
     subscribeToCamps,
     unsubscribe
 } from '../db';
 import { parseCSV, normalizeTransaction } from '../utils/csvParser';
-import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt } from 'lucide-react';
+import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle } from 'lucide-react';
 import './Dashboard.css';
 
 export default function Dashboard() {
@@ -93,10 +94,21 @@ export default function Dashboard() {
         setFilterCategory('');
         setFilterCamp('');
         setFilterType('all');
-        setFilterReview(false);
+        setFilterReview('');
     };
 
     const hasActiveDraft = draft.searchTerm !== searchTerm || draft.dateFrom !== dateFrom || draft.dateTo !== dateTo || draft.filterCategory !== filterCategory || draft.filterCamp !== filterCamp;
+
+    // Count currently APPLIED filters (for the badge)
+    const activeFiltersCount = [
+        searchTerm,
+        dateFrom,
+        dateTo,
+        filterCategory,
+        filterCamp,
+        filterType !== 'all' ? filterType : '',
+        filterReview,
+    ].filter(Boolean).length;
 
     // Setup realtime subscriptions
     useEffect(() => {
@@ -176,7 +188,16 @@ export default function Dashboard() {
     const handleBulkDelete = async () => {
         if (!selectedIds.size) return;
         if (window.confirm(`Usunąć ${selectedIds.size} transakcji?`)) {
-            await deleteTransactions(Array.from(selectedIds));
+            const ids = Array.from(selectedIds);
+            const snapshots = transactions.filter(t => selectedIds.has(t.id));
+            await deleteTransactions(ids);
+            // Log each deletion with the full pre-delete snapshot
+            await Promise.all(snapshots.map(snap => logActivity({
+                action: 'delete',
+                transactionId: snap.id,
+                snapshot: snap,
+                message: `Usunięto transakcję: ${snap.title || ''} (${snap.amount} ${snap.currency || 'PLN'})`,
+            })));
             setSelectedIds(new Set());
             await loadTransactions();
         }
@@ -247,14 +268,21 @@ export default function Dashboard() {
     // Admin confirms the camp assignment — clears the needs_review flag
     // If the clicked transaction is part of a multi-selection, confirm ALL selected
     const handleCampConfirm = (id) => {
-        if (selectedIds.has(id) && selectedIds.size > 1) {
-            setTransactions(prev => prev.map(t => selectedIds.has(t.id) ? { ...t, needs_review: false } : t));
-            Promise.all(Array.from(selectedIds).map(sid => updateTransaction(sid, { needs_review: false })));
-            setSelectedIds(new Set());
-        } else {
-            setTransactions(prev => prev.map(t => t.id === id ? { ...t, needs_review: false } : t));
-            updateTransaction(id, { needs_review: false });
-        }
+        const targetIds = (selectedIds.has(id) && selectedIds.size > 1) ? Array.from(selectedIds) : [id];
+        setTransactions(prev => prev.map(t => targetIds.includes(t.id) ? { ...t, needs_review: false } : t));
+        Promise.all(targetIds.map(sid => updateTransaction(sid, { needs_review: false })));
+        // Log confirmation for each transaction
+        targetIds.forEach(tid => {
+            const t = transactions.find(x => x.id === tid);
+            if (!t) return;
+            logActivity({
+                action: 'category_confirm',
+                transactionId: tid,
+                snapshot: { ...t, needs_review: false },
+                message: `Potwierdzono dopasowanie: ${t.title || ''} → ${t.category || ''}${t.camp ? ` · ${t.camp}` : ''}`,
+            });
+        });
+        if (targetIds.length > 1) setSelectedIds(new Set());
     };
 
     // Sub-transactions
@@ -269,8 +297,9 @@ export default function Dashboard() {
         const parent = transactions.find(t => t.id === parentId);
         const amount = parseFloat(String(newSub.amount).replace(',', '.'));
         if (!amount || isNaN(amount)) return alert('Podaj kwotę');
+        let createdSub = null;
         try {
-            await addTransaction({
+            createdSub = await addTransaction({
                 parent_id: parentId,
                 date: parent.date,
                 amount,
@@ -283,6 +312,13 @@ export default function Dashboard() {
                 note: newSub.note || '',
                 needs_review: false,
                 source_file: 'manual',
+            });
+            await logActivity({
+                action: 'split_add',
+                transactionId: createdSub?.id || null,
+                snapshot: createdSub,
+                message: `Dodano podział: ${amount} ${parent.currency || 'PLN'} · ${newSub.category || parent.category || '—'}${newSub.camp ? ` · ${newSub.camp}` : ''}`,
+                details: { parent_id: parentId, parent_title: parent.title, parent_amount: parent.amount },
             });
         } catch (err) {
             alert('Błąd zapisu podziału: ' + err.message + '\n\nSprawdź czy uruchomiłeś migrację add_parent_id.sql w Supabase SQL Editor.');
@@ -298,11 +334,25 @@ export default function Dashboard() {
     };
 
     const handleDeleteSub = async (id) => {
+        const snapshot = transactions.find(t => t.id === id);
+        if (!snapshot) return;
+        const confirmMsg = `Usunąć podział ${snapshot.amount} ${snapshot.currency || 'PLN'}${snapshot.category ? ` (${snapshot.category})` : ''}?`;
+        if (!window.confirm(confirmMsg)) return;
         setTransactions(prev => prev.filter(t => t.id !== id));
         const { error } = await supabase.from('transactions').delete().eq('id', id);
         if (error) {
             console.error('Delete sub error:', error);
             await loadTransactions(); // reload to restore if failed
+            return;
+        }
+        if (snapshot) {
+            await logActivity({
+                action: 'split_delete',
+                transactionId: id,
+                snapshot,
+                message: `Usunięto podział: ${snapshot.amount} ${snapshot.currency || 'PLN'} · ${snapshot.category || '—'}`,
+                details: { parent_id: snapshot.parent_id },
+            });
         }
     };
 
@@ -325,7 +375,7 @@ export default function Dashboard() {
         const signedAmount = cashForm.type === 'expense' ? -amountPLN : amountPLN;
 
         try {
-            await addTransaction({
+            const created = await addTransaction({
                 date: cashForm.date,
                 amount: signedAmount,
                 original_amount: originalAmount,
@@ -336,6 +386,12 @@ export default function Dashboard() {
                 camp: cashForm.camp || '',
                 needs_review: false,
                 source_file: 'cash',
+            });
+            await logActivity({
+                action: 'create',
+                transactionId: created?.id || null,
+                snapshot: created,
+                message: `Dodano ${cashForm.type === 'expense' ? 'wydatek' : 'przychód'} gotówkowy: ${cashForm.title.trim()} · ${signedAmount.toFixed(2)} PLN`,
             });
             setShowCashModal(false);
             setCashForm({ type: 'income', date: new Date().toISOString().slice(0, 10), amount: '', currency: 'PLN', exchangeRate: '', title: '', sender: '', category: '', camp: '' });
@@ -389,15 +445,16 @@ export default function Dashboard() {
 
             await addTransactions(newTransactions);
 
-            const log = JSON.parse(localStorage.getItem('activity_log') || '[]');
-            log.unshift({
-                type: 'csv_import',
+            await logActivity({
+                action: 'csv_import',
                 message: `Zaimportowano plik: ${file.name}`,
-                details: `${newTransactions.length} nowych transakcji`,
-                timestamp: new Date().toISOString()
+                details: {
+                    file_name: file.name,
+                    imported_count: newTransactions.length,
+                    total_rows_in_file: formattedData.length,
+                    skipped_duplicates: formattedData.length - newTransactions.length,
+                },
             });
-            // Keep only last 200 entries
-            localStorage.setItem('activity_log', JSON.stringify(log.slice(0, 200)));
 
             await loadTransactions();
 
@@ -438,7 +495,15 @@ export default function Dashboard() {
                 return;
             }
 
+            const snapshots = all.filter(t => idsToDelete.includes(t.id));
             await deleteTransactions(idsToDelete);
+            await Promise.all(snapshots.map(snap => logActivity({
+                action: 'delete',
+                transactionId: snap.id,
+                snapshot: snap,
+                message: `Usunięto duplikat: ${snap.title || ''} (${snap.amount} ${snap.currency || 'PLN'})`,
+                details: { reason: 'duplicate_removal' },
+            })));
             await loadTransactions();
             alert(`Usunięto ${idsToDelete.length} duplikat${idsToDelete.length === 1 ? '' : idsToDelete.length < 5 ? 'y' : 'ów'}.`);
         } catch (err) {
@@ -483,9 +548,10 @@ export default function Dashboard() {
             idsToCommit.forEach(tid => {
                 const edits = next[tid];
                 if (!edits) return;
+                const prevTx = transactions.find(t => t.id === tid);
                 // If camp is empty after edit AND category requires a camp → mark as needs_review
                 const finalCamp = 'camp' in edits ? edits.camp : undefined;
-                const finalCategory = 'category' in edits ? edits.category : transactions.find(t => t.id === tid)?.category;
+                const finalCategory = 'category' in edits ? edits.category : prevTx?.category;
                 const campRequired = isTurystyczna(finalCategory);
                 const needsReview = campRequired ? (finalCamp !== undefined ? !finalCamp : false) : false;
                 const updates = { ...edits, needs_review: needsReview };
@@ -495,6 +561,25 @@ export default function Dashboard() {
                     return p.map(t => t.id === tid ? { ...t, ...updates } : t);
                 });
                 updateTransaction(tid, updates);
+                // Build diff and log
+                if (prevTx) {
+                    const changes = {};
+                    Object.keys(updates).forEach(k => {
+                        if (prevTx[k] !== updates[k]) {
+                            changes[k] = { from: prevTx[k] ?? null, to: updates[k] ?? null };
+                        }
+                    });
+                    if (Object.keys(changes).length > 0) {
+                        const fieldNames = Object.keys(changes).filter(k => k !== 'needs_review').join(', ') || 'needs_review';
+                        logActivity({
+                            action: 'update',
+                            transactionId: tid,
+                            snapshot: { ...prevTx, ...updates },
+                            changes,
+                            message: `Zmieniono ${fieldNames}: ${prevTx.title || ''} (${prevTx.amount} ${prevTx.currency || 'PLN'})`,
+                        });
+                    }
+                }
                 delete next[tid];
             });
             return next;
@@ -547,27 +632,60 @@ export default function Dashboard() {
     // Set of IDs that are split parents — these should never show as needs_review
     const splitParentIds = new Set(Object.keys(childrenByParent));
 
-    const filteredTransactions = transactions?.filter(t => {
-        if (t.parent_id) return false; // sub-transactions shown inline under parent
-
-        const matchesSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            t.sender.toLowerCase().includes(searchTerm.toLowerCase());
-
+    // Shared predicate — applies all active filters to a single row (parent or child)
+    const matchesAllFilters = (t) => {
+        const matchesSearch = t.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            t.sender?.toLowerCase().includes(searchTerm.toLowerCase());
         if (!matchesSearch) return false;
 
-        if (filterType === 'income') { if (t.amount <= 0) return false; }
-        if (filterType === 'expense') { if (t.amount >= 0) return false; }
-        if (filterType === 'euro') { if (t.currency !== 'EUR') return false; }
+        if (filterType === 'income' && t.amount <= 0) return false;
+        if (filterType === 'expense' && t.amount >= 0) return false;
+        if (filterType === 'euro' && t.currency !== 'EUR') return false;
 
         if (dateFrom && t.date < dateFrom) return false;
         if (dateTo && t.date > dateTo) return false;
 
         if (filterCategory && t.category !== filterCategory) return false;
-        if (filterCamp && t.camp !== filterCamp) return false;
+        if (filterCamp && filterCamp !== '__none__' && t.camp !== filterCamp) return false;
+        if (filterCamp === '__none__' && t.camp) return false;
+
         if (filterReview === 'uncertain' && !(t.needs_review && t.camp)) return false;
         if (filterReview === 'missing' && !(t.needs_review && !t.camp)) return false;
 
         return true;
+    };
+
+    // Children of each split parent that currently match the active filters
+    const matchingChildrenByParent = {};
+    Object.entries(childrenByParent).forEach(([parentId, kids]) => {
+        const matching = kids.filter(matchesAllFilters);
+        if (matching.length > 0) matchingChildrenByParent[parentId] = matching;
+    });
+
+    // Predicate that decides whether a row (parent) appears in the table
+    const parentPassesFilters = (t) => {
+        // For split parents: use only non-category/camp/review filters on the parent itself,
+        // then require at least one child matching the category/camp/review filters.
+        if (splitParentIds.has(t.id)) {
+            const matchesSearch = t.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                t.sender?.toLowerCase().includes(searchTerm.toLowerCase());
+            if (!matchesSearch) return false;
+            if (filterType === 'income' && t.amount <= 0) return false;
+            if (filterType === 'expense' && t.amount >= 0) return false;
+            if (filterType === 'euro' && t.currency !== 'EUR') return false;
+            if (dateFrom && t.date < dateFrom) return false;
+            if (dateTo && t.date > dateTo) return false;
+            // If any row-level filter narrows results → require a matching child
+            const hasNarrowing = !!(filterCategory || filterCamp || filterReview);
+            if (hasNarrowing) return (matchingChildrenByParent[t.id]?.length || 0) > 0;
+            return true;
+        }
+        return matchesAllFilters(t);
+    };
+
+    const filteredTransactions = transactions?.filter(t => {
+        if (t.parent_id) return false; // sub-transactions shown inline under parent
+        return parentPassesFilters(t);
     }).sort((a, b) => {
         let aValue = a[sortConfig.key] || '';
         let bValue = b[sortConfig.key] || '';
@@ -633,26 +751,24 @@ export default function Dashboard() {
     const displayedTransactions = filteredTransactions?.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
     // KPI stats — based on filtered transactions (respects all active filters)
-    // Split parents are excluded; their children are included individually (with same filters applied)
+    // Split parents are excluded from sums; their children are counted individually using the same filters.
     const kpiParents = (filteredTransactions || []).filter(t => !splitParentIds.has(t.id));
-    // Children are only counted when no review filter is active
-    // (review filter targets parent transactions — adding children would inflate KPI)
-    const kpiChildren = filterReview ? [] : (transactions || []).filter(t => {
-        if (!t.parent_id) return false;
-        if (filterCamp && t.camp !== filterCamp) return false;
-        if (filterCategory && t.category !== filterCategory) return false;
-        if (dateFrom && t.date < dateFrom) return false;
-        if (dateTo && t.date > dateTo) return false;
-        return true;
-    });
+    // All children from split parents that match the active filters
+    const kpiChildren = Object.values(matchingChildrenByParent).flat();
     const kpiItems   = [...kpiParents, ...kpiChildren];
     const kpiIncome  = kpiItems.filter(t => t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
     const kpiExpense = kpiItems.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
     const kpiBalance = kpiIncome - kpiExpense;
     const kpiCount   = kpiItems.length;
     const kpiZwrot   = kpiItems.filter(t => t.category === 'Zwrot' && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    // Review counters operate only on leaf parents (split parents never carry needs_review)
     const kpiReview  = kpiParents.filter(t => t.needs_review && t.camp).length;
     const kpiMissing = kpiParents.filter(t => t.needs_review && !t.camp).length;
+    // New KPIs
+    const kpiNetProfit = kpiIncome - kpiExpense - kpiZwrot;
+    const kpiEurIncome = kpiItems.filter(t => t.currency === 'EUR' && t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
+    const kpiEurExpense = kpiItems.filter(t => t.currency === 'EUR' && t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+    const kpiCategorized = kpiItems.length > 0 ? Math.round((kpiItems.filter(t => t.category).length / kpiItems.length) * 100) : 100;
     const fmt = (n) => n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     if (loading) {
@@ -663,7 +779,7 @@ export default function Dashboard() {
         <div className="dashboard-container">
 
             {/* ── KPI Cards ── */}
-            <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+            <div className="kpi-grid">
                 <div className="kpi-card">
                     <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,#05CD99,#00B385)' }}>
                         <TrendingUp size={20} color="#fff" />
@@ -671,6 +787,9 @@ export default function Dashboard() {
                     <div className="kpi-body">
                         <span className="kpi-label">Przychody</span>
                         <span className="kpi-value" style={{ color: '#05CD99' }}>{fmt(kpiIncome)} PLN</span>
+                        {kpiEurIncome > 0 && (
+                            <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>+ {fmt(kpiEurIncome)} EUR</span>
+                        )}
                     </div>
                 </div>
                 <div className="kpi-card">
@@ -680,6 +799,21 @@ export default function Dashboard() {
                     <div className="kpi-body">
                         <span className="kpi-label">Wydatki</span>
                         <span className="kpi-value" style={{ color: '#EE5D50' }}>{fmt(kpiExpense)} PLN</span>
+                        {kpiEurExpense > 0 && (
+                            <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>+ {fmt(kpiEurExpense)} EUR</span>
+                        )}
+                    </div>
+                </div>
+                <div className="kpi-card">
+                    <div className="kpi-icon-wrap" style={{ background: kpiNetProfit >= 0 ? 'linear-gradient(135deg,#1570EF,#0E5AC8)' : 'linear-gradient(135deg,#DC2626,#B91C1C)' }}>
+                        <DollarSign size={20} color="#fff" />
+                    </div>
+                    <div className="kpi-body">
+                        <span className="kpi-label">Zysk netto</span>
+                        <span className="kpi-value" style={{ color: kpiNetProfit >= 0 ? '#1570EF' : '#DC2626' }}>{fmt(kpiNetProfit)} PLN</span>
+                        {kpiZwrot > 0 && (
+                            <span className="kpi-badge" style={{ background: '#EDE9FE', color: '#6D28D9' }}>zwroty: {fmt(kpiZwrot)}</span>
+                        )}
                     </div>
                 </div>
                 <div className="kpi-card">
@@ -689,14 +823,29 @@ export default function Dashboard() {
                     <div className="kpi-body">
                         <span className="kpi-label">Transakcji</span>
                         <span className="kpi-value" style={{ color: '#1B2559' }}>{kpiCount.toLocaleString('pl-PL')}</span>
+                    </div>
+                </div>
+                <div className="kpi-card">
+                    <div className="kpi-icon-wrap" style={{ background: kpiCategorized === 100 ? 'linear-gradient(135deg,#05CD99,#00B385)' : 'linear-gradient(135deg,#F59E0B,#D97706)' }}>
+                        <PieChart size={20} color="#fff" />
+                    </div>
+                    <div className="kpi-body">
+                        <span className="kpi-label">Skategoryzowane</span>
+                        <span className="kpi-value" style={{ color: kpiCategorized === 100 ? '#05CD99' : '#D97706' }}>{kpiCategorized}%</span>
+                    </div>
+                </div>
+                <div className="kpi-card">
+                    <div className="kpi-icon-wrap" style={{ background: (kpiReview + kpiMissing) > 0 ? 'linear-gradient(135deg,#EE5D50,#DC2626)' : 'linear-gradient(135deg,#05CD99,#00B385)' }}>
+                        <AlertCircle size={20} color="#fff" />
+                    </div>
+                    <div className="kpi-body">
+                        <span className="kpi-label">Do przejrzenia</span>
+                        <span className="kpi-value" style={{ color: (kpiReview + kpiMissing) > 0 ? '#EE5D50' : '#05CD99' }}>{kpiReview + kpiMissing}</span>
                         {kpiReview > 0 && (
-                            <span className="kpi-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>{kpiReview} do przejrzenia</span>
+                            <span className="kpi-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>{kpiReview} sugerowane</span>
                         )}
                         {kpiMissing > 0 && (
                             <span className="kpi-badge" style={{ background: '#FEE2E2', color: '#991B1B' }}>{kpiMissing} bez obozu</span>
-                        )}
-                        {kpiZwrot > 0 && (
-                            <span className="kpi-badge" style={{ background: '#EDE9FE', color: '#6D28D9' }}>{fmt(kpiZwrot)} PLN zwrotów</span>
                         )}
                     </div>
                 </div>
@@ -721,7 +870,7 @@ export default function Dashboard() {
                         style={{ borderColor: '#F59E0B', color: filterReview === 'uncertain' ? '#fff' : '#92400E', background: filterReview === 'uncertain' ? '#F59E0B' : 'transparent' }}
                     >
                         <span className="review-dot" style={{ background: '#F59E0B' }} />
-                        Do przejrzenia ({transactions.filter(t => t.needs_review && t.camp).length})
+                        Do przejrzenia ({kpiReview})
                     </button>
                     <button
                         className={`review-btn ${filterReview === 'missing' ? 'active' : ''}`}
@@ -730,7 +879,7 @@ export default function Dashboard() {
                         style={{ borderColor: '#EE5D50', color: filterReview === 'missing' ? '#fff' : '#991B1B', background: filterReview === 'missing' ? '#EE5D50' : 'transparent' }}
                     >
                         <span className="review-dot" style={{ background: '#EE5D50' }} />
-                        Bez obozu ({transactions.filter(t => t.needs_review && !t.camp).length})
+                        Bez obozu ({kpiMissing})
                     </button>
                     <div className="filter-spacer" />
                     <div className="filter-field-group">
@@ -812,6 +961,7 @@ export default function Dashboard() {
                         <span className="filter-field-label">Wyjazd</span>
                         <select value={draft.filterCamp} onChange={e => setDraft(d => ({ ...d, filterCamp: e.target.value }))} className="filter-select">
                             <option value="">Wszystkie</option>
+                            <option value="__none__">— Bez wyjazdu —</option>
                             {camps?.map(c => (
                                 <option key={c.id} value={c.name}>{c.name}</option>
                             ))}
@@ -837,9 +987,24 @@ export default function Dashboard() {
                         Usuń duplikaty
                     </button>
                     <div className="filter-spacer" />
+                    {activeFiltersCount > 0 && (
+                        <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '4px 10px',
+                            borderRadius: '14px',
+                            background: '#EDE9FE',
+                            color: '#6D28D9',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                        }}>
+                            {activeFiltersCount} aktywn{activeFiltersCount === 1 ? 'y filtr' : activeFiltersCount < 5 ? 'e filtry' : 'ych filtrów'}
+                        </span>
+                    )}
                     <button className="btn-filter-clear" onClick={clearFilters}>Wyczyść filtry</button>
                     <button className={`btn-filter-apply ${hasActiveDraft ? 'has-changes' : ''}`} onClick={applyFilters}>
-                        Zastosuj filtry
+                        Zastosuj filtry{hasActiveDraft ? ' •' : ''}
                     </button>
                     <div className="filter-actions-separator" />
                     <button
@@ -900,6 +1065,9 @@ export default function Dashboard() {
                                 const isAddingHere = addingSubFor === t.id;
                                 const allocatedSum = children.reduce((s, c) => s + (c.amount || 0), 0);
                                 const requiresCampSub = (cat) => cat && cat.toLowerCase().includes('usługa turystyczna');
+                                const hasNarrowingFilter = !!(filterCategory || filterCamp || filterReview);
+                                const matchingChildren = matchingChildrenByParent[t.id] || [];
+                                const visibleChildren = hasNarrowingFilter ? matchingChildren : children;
                                 return (
                             <React.Fragment key={t.id}>
                                 <tr className={t.needs_review ? (t.camp ? 'needs-review-uncertain' : 'needs-review-missing') : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
@@ -943,7 +1111,38 @@ export default function Dashboard() {
                                     </td>
                                     <td>
                                         {children.length > 0 ? (
-                                            <span style={{ color: '#A3AED0', fontSize: '12px', fontStyle: 'italic' }}>— podzielona —</span>
+                                            <>
+                                            <span style={{
+                                                display: 'inline-block',
+                                                background: '#EDE9FE',
+                                                color: '#6D28D9',
+                                                padding: '3px 8px',
+                                                borderRadius: '6px',
+                                                fontSize: '11px',
+                                                fontWeight: 700,
+                                                letterSpacing: '0.3px'
+                                            }}>
+                                                PODZIELONE ({hasNarrowingFilter
+                                                    ? `${matchingChildren.length}/${children.length}`
+                                                    : children.length})
+                                            </span>
+                                            {Math.abs(t.amount - allocatedSum) > 0.01 && (
+                                                <span style={{
+                                                    display: 'inline-block',
+                                                    background: '#FEF3C7',
+                                                    color: '#92400E',
+                                                    padding: '2px 6px',
+                                                    borderRadius: '6px',
+                                                    fontSize: '10px',
+                                                    fontWeight: 600,
+                                                    marginLeft: '4px'
+                                                }} title={`Suma podziałów: ${fmt(allocatedSum)} PLN (parent: ${fmt(t.amount)} PLN)`}>
+                                                    {t.amount > allocatedSum
+                                                        ? `+${fmt(t.amount - allocatedSum)} niedopodzielone`
+                                                        : `${fmt(allocatedSum - t.amount)} nadwyżka`}
+                                                </span>
+                                            )}
+                                            </>
                                         ) : (() => {
                                             const pendingCat = pendingEdits[t.id]?.category;
                                             const displayCat = pendingCat !== undefined ? pendingCat : (t.category || '');
@@ -956,7 +1155,7 @@ export default function Dashboard() {
                                                     style={{
                                                         ...getCategoryStyle(displayCat),
                                                         ...(!displayCat ? { color: '#EE5D50', fontWeight: 600 } : {}),
-                                                        ...(hasPending && pendingCat !== undefined ? { border: '2px solid #4318FF' } : {})
+                                                        ...(hasPending && pendingCat !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {})
                                                     }}
                                                 >
                                                     <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
@@ -971,7 +1170,7 @@ export default function Dashboard() {
                                     </td>
                                     <td>
                                         {children.length > 0 ? (
-                                            <span style={{ color: '#A3AED0', fontSize: '12px', fontStyle: 'italic' }}>— podzielona —</span>
+                                            <span style={{ color: '#6D28D9', fontSize: '11px', fontWeight: 600, background: '#EDE9FE', padding: '2px 8px', borderRadius: '6px' }}>wg podziału</span>
                                         ) : (() => {
                                             const pendingCamp = pendingEdits[t.id]?.camp;
                                             const displayCamp = pendingCamp !== undefined ? pendingCamp : (t.camp || '');
@@ -987,7 +1186,7 @@ export default function Dashboard() {
                                                         className={`category-select ${!hasPending && t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
                                                         style={{
                                                             width: '120px',
-                                                            ...(hasPending && pendingCamp !== undefined ? { border: '2px solid #4318FF' } : {}),
+                                                            ...(hasPending && pendingCamp !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {}),
                                                             ...(!isTurystyczna(effectiveCat) ? { opacity: 0.4, pointerEvents: hasPending ? 'none' : 'auto' } : {})
                                                         }}
                                                         disabled={!isTurystyczna(effectiveCat)}
@@ -1032,8 +1231,15 @@ export default function Dashboard() {
                                                 }}
                                                 onClick={() => {
                                                     const newNote = window.prompt('Wpisz notatkę do tej transakcji:', t.note || '');
-                                                    if (newNote !== null) {
+                                                    if (newNote !== null && newNote !== t.note) {
                                                         updateTransaction(t.id, { note: newNote });
+                                                        logActivity({
+                                                            action: 'note_update',
+                                                            transactionId: t.id,
+                                                            snapshot: { ...t, note: newNote },
+                                                            changes: { note: { from: t.note || null, to: newNote || null } },
+                                                            message: `Zmieniono notatkę: ${t.title || ''}`,
+                                                        });
                                                     }
                                                 }}
                                                 title={t.note}
@@ -1058,6 +1264,13 @@ export default function Dashboard() {
                                                     const newNote = window.prompt('Dodaj nową notatkę:', '');
                                                     if (newNote !== null && newNote.trim() !== '') {
                                                         updateTransaction(t.id, { note: newNote });
+                                                        logActivity({
+                                                            action: 'note_update',
+                                                            transactionId: t.id,
+                                                            snapshot: { ...t, note: newNote },
+                                                            changes: { note: { from: null, to: newNote } },
+                                                            message: `Dodano notatkę: ${t.title || ''}`,
+                                                        });
                                                     }
                                                 }}
                                                 title="Dodaj notatkę..."
@@ -1071,7 +1284,7 @@ export default function Dashboard() {
                                 </tr>
 
                                 {/* Sub-transaction rows */}
-                                {isExpanded && children.map(child => (
+                                {isExpanded && visibleChildren.map(child => (
                                     <tr key={child.id} className="sub-transaction">
                                         <td></td>
                                         <td></td>
@@ -1088,7 +1301,7 @@ export default function Dashboard() {
                                                 value={pendingEdits[child.id]?.category ?? child.category ?? ''}
                                                 onChange={e => handlePendingChange(child.id, 'category', e.target.value)}
                                                 className="category-select"
-                                                style={pendingEdits[child.id]?.category !== undefined ? { border: '2px solid #4318FF' } : {}}
+                                                style={pendingEdits[child.id]?.category !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {}}
                                             >
                                                 <option value="">-- Wybierz --</option>
                                                 {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -1102,7 +1315,7 @@ export default function Dashboard() {
                                                     value={pendingEdits[child.id]?.camp ?? child.camp ?? ''}
                                                     onChange={e => handlePendingChange(child.id, 'camp', e.target.value)}
                                                     className="category-select"
-                                                    style={{ width: '100px', ...(pendingEdits[child.id]?.camp !== undefined ? { border: '2px solid #4318FF' } : {}) }}
+                                                    style={{ width: '100px', ...(pendingEdits[child.id]?.camp !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {}) }}
                                                 >
                                                     <option value="">-</option>
                                                     {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}

@@ -285,3 +285,73 @@ export const unsubscribe = (channel) => {
         supabase.removeChannel(channel);
     }
 };
+
+// ============================================
+// ACTIVITY LOG
+// ============================================
+
+// Strip volatile fields so we store a stable snapshot
+const sanitizeSnapshot = (t) => {
+    if (!t) return null;
+    const { created_at, updated_at, ...rest } = t;
+    return rest;
+};
+
+export const logActivity = async ({
+    action,
+    transactionId = null,
+    snapshot = null,
+    changes = null,
+    message = '',
+    details = null,
+}) => {
+    try {
+        const { error } = await supabase
+            .from('activity_log')
+            .insert([{
+                action,
+                transaction_id: transactionId,
+                transaction_snapshot: snapshot ? sanitizeSnapshot(snapshot) : null,
+                changes,
+                message,
+                details,
+            }]);
+        if (error) {
+            console.error('Error logging activity:', error);
+        }
+    } catch (e) {
+        // Never let logging failures break the user action
+        console.error('logActivity exception:', e);
+    }
+};
+
+export const getActivityLog = async ({ limit = 200, offset = 0, action = null, dateFrom = null, dateTo = null, search = null } = {}) => {
+    let q = supabase
+        .from('activity_log')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+    if (action) q = q.eq('action', action);
+    if (dateFrom) q = q.gte('created_at', `${dateFrom}T00:00:00Z`);
+    if (dateTo) q = q.lte('created_at', `${dateTo}T23:59:59Z`);
+    if (search) q = q.or(`message.ilike.%${search}%`);
+
+    const { data, error, count } = await q;
+    if (error) {
+        console.error('Error fetching activity log:', error);
+        return { rows: [], count: 0 };
+    }
+    return { rows: data || [], count: count || 0 };
+};
+
+export const clearActivityLog = async () => {
+    const { error } = await supabase
+        .from('activity_log')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+        console.error('Error clearing activity log:', error);
+        throw error;
+    }
+};

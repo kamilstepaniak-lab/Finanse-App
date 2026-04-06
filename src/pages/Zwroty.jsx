@@ -18,7 +18,10 @@ export default function Zwroty() {
     const loadData = async () => {
         setLoading(true);
         const all = await getAllTransactions();
-        setTransactions(all.filter(t => t.category === 'Zwrot'));
+        // Exclude split parents — their children carry the real allocation and may
+        // individually be 'Zwrot'. Counting the parent would double-count.
+        const splitParentIds = new Set(all.filter(t => t.parent_id).map(t => t.parent_id));
+        setTransactions(all.filter(t => t.category === 'Zwrot' && !splitParentIds.has(t.id)));
         setLoading(false);
     };
 

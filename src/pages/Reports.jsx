@@ -4,7 +4,7 @@ import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
     PieChart, Pie, Legend, LineChart, Line, CartesianGrid, Area, AreaChart
 } from 'recharts';
-import { TrendingUp, TrendingDown, ArrowUpDown, ArrowDownUp } from 'lucide-react';
+import { TrendingUp, TrendingDown, ArrowUpDown, ArrowDownUp, Download } from 'lucide-react';
 import './Reports.css';
 
 const COLORS = ['#1570EF', '#3B8AFF', '#059669', '#FFB547', '#DC2626', '#9c27b0', '#e91e63', '#EFF4FB'];
@@ -109,13 +109,14 @@ export default function Reports() {
             .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
             .slice(0, 20);
 
-        // Monthly History (also excludes split parents)
+        // Monthly History — use the same date-filtered dataset so chart stays in sync with KPIs
         const monthlyMap = {};
-        transactions.filter(t => !splitParentIds.has(t.id)).forEach(t => {
+        filtered.forEach(t => {
+            if (!t.date) return;
             const month = t.date.slice(0, 7);
             if (!monthlyMap[month]) monthlyMap[month] = { month, income: 0, expense: 0 };
-            if (t.amount > 0) monthlyMap[month].income += t.amount;
-            else monthlyMap[month].expense += Math.abs(t.amount);
+            if (t.amount > 0 && t.category !== 'Zwrot') monthlyMap[month].income += t.amount;
+            else if (t.amount < 0) monthlyMap[month].expense += Math.abs(t.amount);
         });
         const monthlyData = Object.values(monthlyMap).sort((a, b) => a.month.localeCompare(b.month));
 
@@ -156,16 +157,129 @@ export default function Reports() {
         const sumLato = incomeByCampData.filter(c => c.season === 'lato').reduce((s, c) => s + c.value, 0);
         const sumZima = incomeByCampData.filter(c => c.season === 'zima').reduce((s, c) => s + c.value, 0);
 
+        // Weekly cashflow
+        const weeklyMap = {};
+        filtered.forEach(t => {
+            if (!t.date) return;
+            const d = new Date(t.date);
+            const day = d.getDay();
+            const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+            const monday = new Date(d.setDate(diff));
+            const weekKey = monday.toISOString().slice(0, 10);
+            if (!weeklyMap[weekKey]) weeklyMap[weekKey] = { week: weekKey, income: 0, expense: 0 };
+            if (t.amount > 0 && t.category !== 'Zwrot') weeklyMap[weekKey].income += t.amount;
+            else if (t.amount < 0) weeklyMap[weekKey].expense += Math.abs(t.amount);
+        });
+        const weeklyData = Object.values(weeklyMap).sort((a, b) => a.week.localeCompare(b.week));
+
+        // Top contractors (income by sender)
+        const senderMap = {};
+        filtered.filter(t => t.amount > 0 && t.category !== 'Zwrot').forEach(t => {
+            const s = t.sender || 'Nieznany';
+            if (!senderMap[s]) senderMap[s] = { name: s, total: 0, count: 0 };
+            senderMap[s].total += t.amount;
+            senderMap[s].count += 1;
+        });
+        const topContractors = Object.values(senderMap).sort((a, b) => b.total - a.total).slice(0, 20);
+
+        // Camp profitability (income - expense per camp)
+        const campProfitMap = {};
+        filtered.forEach(t => {
+            const campName = t.camp || 'Bez wyjazdu';
+            if (!campProfitMap[campName]) campProfitMap[campName] = { name: campName, income: 0, expense: 0 };
+            if (t.amount > 0 && t.category !== 'Zwrot') campProfitMap[campName].income += t.amount;
+            else if (t.amount < 0) campProfitMap[campName].expense += Math.abs(t.amount);
+        });
+        const campProfitability = Object.values(campProfitMap)
+            .map(c => ({ ...c, profit: c.income - c.expense }))
+            .sort((a, b) => b.profit - a.profit);
+
+        // Period comparison: compute previous period of same length
+        let prevStats = null;
+        if (dateFrom && dateTo) {
+            const from = new Date(dateFrom);
+            const to = new Date(dateTo);
+            const days = Math.round((to - from) / (1000 * 60 * 60 * 24));
+            const prevTo = new Date(from);
+            prevTo.setDate(prevTo.getDate() - 1);
+            const prevFrom = new Date(prevTo);
+            prevFrom.setDate(prevFrom.getDate() - days);
+            const pf = prevFrom.toISOString().slice(0, 10);
+            const pt = prevTo.toISOString().slice(0, 10);
+            const prevFiltered = transactions.filter(t => {
+                if (splitParentIds.has(t.id)) return false;
+                if (t.date < pf || t.date > pt) return false;
+                return true;
+            });
+            const prevIncome = prevFiltered.filter(t => t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
+            const prevExpense = prevFiltered.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+            prevStats = { income: prevIncome, expense: prevExpense, balance: prevIncome - prevExpense, dateFrom: pf, dateTo: pt };
+        }
+
         return {
             stats: { income, expense, balance: income - expense, incomeEUR, expenseEUR, zwrot },
             incomeByCategoryData,
             incomeByCampData,
             monthlyData,
+            weeklyData,
             topExpenses,
+            topContractors,
+            campProfitability,
+            prevStats,
             sumLato,
             sumZima
         };
     }, [transactions, dateFrom, dateTo, campSeasonMap]);
+
+    const exportCSV = () => {
+        const rows = [
+            ['Sekcja', 'Nazwa', 'Kwota PLN', 'Szczegóły'],
+            ['KPI', 'Przychody', reportData.stats.income.toFixed(2), `EUR: ${reportData.stats.incomeEUR.toFixed(2)}`],
+            ['KPI', 'Wydatki', reportData.stats.expense.toFixed(2), `EUR: ${reportData.stats.expenseEUR.toFixed(2)}`],
+            ['KPI', 'Bilans', reportData.stats.balance.toFixed(2), ''],
+            ['KPI', 'Zwroty', (reportData.stats.zwrot || 0).toFixed(2), ''],
+            [],
+            ['Kategoria', 'Przychód PLN'],
+            ...reportData.incomeByCategoryData.map(c => [c.name, c.value.toFixed(2)]),
+            [],
+            ['Wyjazd', 'Przychód PLN', 'EUR', 'Sezon'],
+            ...reportData.incomeByCampData.map(c => [c.name, c.value.toFixed(2), c.eurValue?.toFixed(2) || '0', c.season || '']),
+            [],
+            ['Wyjazd', 'Przychód', 'Wydatki', 'Zysk'],
+            ...reportData.campProfitability.map(c => [c.name, c.income.toFixed(2), c.expense.toFixed(2), c.profit.toFixed(2)]),
+            [],
+            ['Kontrahent', 'Przychód PLN', 'Liczba transakcji'],
+            ...reportData.topContractors.map(c => [c.name, c.total.toFixed(2), c.count]),
+        ];
+        const csv = rows.map(r => Array.isArray(r) ? r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',') : '').join('\n');
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `raport_${dateFrom}_${dateTo}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const pctChange = (curr, prev) => {
+        if (!prev || prev === 0) return null;
+        return Math.round(((curr - prev) / prev) * 100);
+    };
+
+    const ComparisonBadge = ({ current, previous, inverse = false }) => {
+        const pct = pctChange(current, previous);
+        if (pct === null) return null;
+        const isPositive = inverse ? pct < 0 : pct > 0;
+        return (
+            <small style={{
+                color: isPositive ? '#059669' : '#DC2626',
+                fontWeight: 600,
+                fontSize: '11px'
+            }}>
+                {pct > 0 ? '+' : ''}{pct}% vs. poprzedni okres
+            </small>
+        );
+    };
 
     if (loading) return <div className="reports-loading">Pobieranie danych finansowych...</div>;
 
@@ -255,6 +369,9 @@ export default function Reports() {
                             />
                         </div>
                     </div>
+                    <button onClick={exportCSV} className="export-btn" title="Eksportuj raport do CSV">
+                        <Download size={14} /> Eksport CSV
+                    </button>
                 </div>
             </header>
 
@@ -268,6 +385,7 @@ export default function Reports() {
                         {reportData.stats.zwrot > 0 && (
                             <small style={{ color: '#7C3AED', fontWeight: 600 }}>zwroty: {reportData.stats.zwrot.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</small>
                         )}
+                        {reportData.prevStats && <ComparisonBadge current={reportData.stats.income} previous={reportData.prevStats.income} />}
                     </div>
                 </div>
                 <div className="kpi-card expense">
@@ -276,6 +394,7 @@ export default function Reports() {
                         <span>Wydatki</span>
                         <h3>{reportData.stats.expense.toLocaleString()} PLN</h3>
                         <small>{reportData.stats.expenseEUR.toLocaleString()} EUR</small>
+                        {reportData.prevStats && <ComparisonBadge current={reportData.stats.expense} previous={reportData.prevStats.expense} inverse />}
                     </div>
                 </div>
                 <div className="kpi-card balance">
@@ -285,7 +404,11 @@ export default function Reports() {
                         <h3 className={reportData.stats.balance >= 0 ? 'pos' : 'neg'}>
                             {reportData.stats.balance.toLocaleString()} PLN
                         </h3>
-                        <small>Wynik operacyjny</small>
+                        {reportData.prevStats ? (
+                            <ComparisonBadge current={reportData.stats.balance} previous={reportData.prevStats.balance} />
+                        ) : (
+                            <small>Wynik operacyjny</small>
+                        )}
                     </div>
                 </div>
             </section>
@@ -423,7 +546,7 @@ export default function Reports() {
                 </div>
 
                 <div className="chart-container full-width">
-                    <h3>Historia Miesięczna (Wszystkie Transakcje)</h3>
+                    <h3>Historia Miesięczna</h3>
                     <ResponsiveContainer width="100%" height={300}>
                         <BarChart data={reportData.monthlyData}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
@@ -435,6 +558,81 @@ export default function Reports() {
                             <Bar dataKey="expense" name="Wydatki" fill="#DC2626" radius={[4, 4, 0, 0]} barSize={20} />
                         </BarChart>
                     </ResponsiveContainer>
+                </div>
+
+                {reportData.weeklyData.length > 1 && (
+                    <div className="chart-container full-width">
+                        <h3>Cashflow Tygodniowy</h3>
+                        <ResponsiveContainer width="100%" height={280}>
+                            <AreaChart data={reportData.weeklyData}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                                <XAxis dataKey="week" axisLine={false} tickLine={false} fontSize={11} />
+                                <YAxis axisLine={false} tickLine={false} width={80} tickFormatter={(v) => v.toLocaleString('pl-PL')} />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend />
+                                <Area type="monotone" dataKey="income" name="Przychody" stroke="#059669" fill="#05966920" strokeWidth={2} />
+                                <Area type="monotone" dataKey="expense" name="Wydatki" stroke="#DC2626" fill="#DC262620" strokeWidth={2} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                )}
+
+                <div className="grid-secondary-new">
+                    <div className="chart-container expenses-limit-height">
+                        <h3><TrendingUp size={17} style={{ color: '#1570EF', marginRight: 8, verticalAlign: 'middle' }} />Top 20 Kontrahentów (Przychody)</h3>
+                        <div className="table-responsive">
+                            <table className="data-table small-table">
+                                <thead>
+                                    <tr>
+                                        <th>Kontrahent</th>
+                                        <th>Przychód (PLN)</th>
+                                        <th>Transakcji</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {reportData.topContractors.map((c, idx) => (
+                                        <tr key={idx}>
+                                            <td><strong>{c.name}</strong></td>
+                                            <td className="pos fw-bold">{c.total.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
+                                            <td className="text-muted">{c.count}</td>
+                                        </tr>
+                                    ))}
+                                    {reportData.topContractors.length === 0 && (
+                                        <tr><td colSpan="3" className="text-center">Brak danych</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div className="chart-container expenses-limit-height">
+                        <h3>Rentowność Wyjazdów</h3>
+                        <div className="table-responsive">
+                            <table className="data-table small-table">
+                                <thead>
+                                    <tr>
+                                        <th>Wyjazd</th>
+                                        <th>Przychód</th>
+                                        <th>Koszty</th>
+                                        <th>Zysk</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {reportData.campProfitability.map((c, idx) => (
+                                        <tr key={idx}>
+                                            <td><strong>{c.name}</strong></td>
+                                            <td className="pos">{c.income.toLocaleString('pl-PL', { minimumFractionDigits: 2 })}</td>
+                                            <td className="neg">{c.expense.toLocaleString('pl-PL', { minimumFractionDigits: 2 })}</td>
+                                            <td className={`fw-bold ${c.profit >= 0 ? 'pos' : 'neg'}`}>{c.profit.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
+                                        </tr>
+                                    ))}
+                                    {reportData.campProfitability.length === 0 && (
+                                        <tr><td colSpan="4" className="text-center">Brak danych</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </main>
         </div>

@@ -64,6 +64,29 @@
     gap: 8px;
 }
 
+.export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    border: 1.5px solid #1570EF;
+    background: #EFF6FF;
+    color: #1570EF;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    transition: all 0.15s;
+    height: 36px;
+    white-space: nowrap;
+}
+
+.export-btn:hover {
+    background: #1570EF;
+    color: #fff;
+}
+
 .filter-input-wrapper {
     background: white;
     padding: 8px 14px;
