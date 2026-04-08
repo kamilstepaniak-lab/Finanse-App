@@ -127,7 +127,11 @@ export const saveLearningExample = async (example) => {
 
     if (rows && rows.length > 50) {
         const toDelete = rows.slice(50).map(r => r.id);
-        await supabase.from('social_learning_examples').delete().in('id', toDelete);
+        const { error: cleanupError } = await supabase
+            .from('social_learning_examples')
+            .delete()
+            .in('id', toDelete);
+        if (cleanupError) throw cleanupError;
     }
 };
 

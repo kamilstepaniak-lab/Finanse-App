@@ -7,6 +7,16 @@ const ZERNIO_BASE = 'https://api.zernio.com'; // verify this base URL in docs
  * When both FB and IG are selected, FB text is used (primary platform).
  */
 export function buildZernioPayload(post) {
+    if (!post.publish_fb && !post.publish_ig) {
+        throw new Error('At least one platform (FB or IG) must be selected');
+    }
+    if (post.publish_fb && !post.final_content_fb?.trim()) {
+        throw new Error('Facebook content required when publish_fb is true');
+    }
+    if (post.publish_ig && !post.final_content_ig?.trim()) {
+        throw new Error('Instagram content required when publish_ig is true');
+    }
+
     const platforms = [];
     if (post.publish_fb) platforms.push('facebook');
     if (post.publish_ig) platforms.push('instagram');
