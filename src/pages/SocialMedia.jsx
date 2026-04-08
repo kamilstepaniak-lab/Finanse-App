@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, CalendarRange } from 'lucide-react';
 import PostTable from './social/PostTable.jsx';
+import PostEditPanel from './social/PostEditPanel.jsx';
 import { getPosts, getPublishedPosts, createPost, updatePost } from '../lib/social/db.js';
 import './SocialMedia.css';
 
@@ -129,14 +130,14 @@ export default function SocialMedia() {
                 )}
             </div>
 
-            {/* Edit panel — placeholder until Task 16 */}
+            {/* Edit panel */}
             {editingPost && (
-                <div className="edit-panel-overlay" onClick={() => { setEditingPost(null); loadPosts(); }}>
-                    <div className="edit-panel" onClick={e => e.stopPropagation()}>
-                        <p>Edit panel — Task 16</p>
-                        <button onClick={() => { setEditingPost(null); loadPosts(); }}>Zamknij</button>
-                    </div>
-                </div>
+                <PostEditPanel
+                    post={editingPost}
+                    channel={channel}
+                    onClose={() => { setEditingPost(null); loadPosts(); }}
+                    onToast={(msg, type) => showToast(msg, type)}
+                />
             )}
 
             {/* Toast */}
