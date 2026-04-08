@@ -7,6 +7,7 @@ import Camps from './pages/Camps';
 import VatMarza from './pages/VatMarza';
 import Zwroty from './pages/Zwroty';
 import ActivityLog from './pages/ActivityLog';
+import SocialMedia from './pages/SocialMedia';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="vat-marza" element={<VatMarza />} />
           <Route path="zwroty" element={<Zwroty />} />
           <Route path="historia" element={<ActivityLog />} />
+          <Route path="social" element={<SocialMedia />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
