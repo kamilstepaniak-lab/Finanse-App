@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, CalendarRange } from 'lucide-react';
 import PostTable from './social/PostTable.jsx';
 import PostEditPanel from './social/PostEditPanel.jsx';
+import PlanMonthModal from './social/PlanMonthModal.jsx';
 import { getPosts, getPublishedPosts, createPost, updatePost } from '../lib/social/db.js';
 import './SocialMedia.css';
 
@@ -137,6 +138,15 @@ export default function SocialMedia() {
                     channel={channel}
                     onClose={() => { setEditingPost(null); loadPosts(); }}
                     onToast={(msg, type) => showToast(msg, type)}
+                />
+            )}
+
+            {/* Plan month modal */}
+            {showPlanMonth && (
+                <PlanMonthModal
+                    channel={channel}
+                    onClose={() => setShowPlanMonth(false)}
+                    onComplete={loadPosts}
                 />
             )}
 

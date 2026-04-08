@@ -476,3 +476,16 @@
 }
 
 .drive-uploading { color: #2563eb; }
+
+.plan-month-modal {
+    background: #fff;
+    border-radius: 12px;
+    width: 480px;
+    max-width: 90vw;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    margin: auto;
+}
