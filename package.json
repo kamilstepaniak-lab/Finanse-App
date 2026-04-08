@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.85.0",
     "@supabase/supabase-js": "^2.39.0",
     "lucide-react": "^0.562.0",
     "papaparse": "^5.5.3",
