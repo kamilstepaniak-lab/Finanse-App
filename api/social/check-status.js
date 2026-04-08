@@ -30,6 +30,11 @@ export default async function handler(req, res) {
             ? process.env.ZERNIO_API_KEY_BS
             : process.env.ZERNIO_API_KEY_AP;
 
+        if (!apiKey) {
+            console.error(`check-status: missing Zernio API key for channel ${post.channel}`);
+            continue;
+        }
+
         try {
             const status = await getZernioPostStatus(post.zernio_post_id, apiKey);
             if (status === 'published' || status === 'failed') {

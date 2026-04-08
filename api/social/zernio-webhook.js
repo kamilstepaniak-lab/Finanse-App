@@ -18,7 +18,7 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Invalid secret' });
     }
 
-    const { post_id, status, published_at, error: zernioError } = req.body;
+    const { post_id, status, published_at } = req.body;
 
     if (!post_id || !status) {
         return res.status(400).json({ error: 'post_id and status required' });

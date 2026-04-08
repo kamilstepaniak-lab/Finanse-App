@@ -56,7 +56,9 @@ export async function publishToZernio(post, apiKey) {
     }
 
     const data = await res.json();
-    return { zernio_post_id: data.id ?? data.post_id }; // adjust field name per docs
+    const zernioId = data.id ?? data.post_id ?? data.zernio_id;
+    if (!zernioId) throw new Error('Zernio response missing id field');
+    return { zernio_post_id: zernioId };
 }
 
 /**
