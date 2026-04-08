@@ -1,0 +1,13 @@
+{
+  "name": "finanse-firma",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
+  "crons": [
+    {
+      "path": "/api/social/check-status",
+      "schedule": "*/30 * * * *"
+    }
+  ]
+}
