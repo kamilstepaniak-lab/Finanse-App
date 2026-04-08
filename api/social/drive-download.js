@@ -61,7 +61,7 @@ export default async function handler(req, res) {
         let mediaType;
         if (IMAGE_MIMES.includes(mimeType)) mediaType = 'image';
         else if (VIDEO_MIMES.includes(mimeType)) mediaType = 'video';
-        else return res.status(400).json({ error: `Unsupported file type: ${mimeType}` });
+        else return res.status(400).json({ error: 'Nieobsługiwany typ pliku.' });
 
         // Download file stream
         const fileStream = await drive.files.get(
