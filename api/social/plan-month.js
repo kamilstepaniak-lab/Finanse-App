@@ -1,11 +1,11 @@
 // api/social/plan-month.js
 // POST /api/social/plan-month
 // Body: { channel }
-// Generates a month's worth of draft posts using Claude + seasonal rules.
+// Generates draft posts for the next 30 days using Claude + seasonal rules.
+// Dates are NOT set — user picks them manually when approving each post.
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
-import { fromZonedTime } from 'date-fns-tz';
 import { getMonthPlan } from '../../src/lib/social/seasonal-rules.js';
 import { getChannelConfig } from '../../src/lib/social/channel-config.js';
 import { buildGenerationPrompt } from '../../src/lib/social/prompt-builder.js';
@@ -24,14 +24,13 @@ export default async function handler(req, res) {
 
     const now = new Date();
     const month = now.getMonth() + 1;
-    const year = now.getFullYear();
     const plan = getMonthPlan(channel, month);
     const config = getChannelConfig(channel);
 
     const prompt = `
 Jesteś planistą contentu dla ${config.name}.
 
-Zaplanuj ${plan.totalPosts} postów na ${month}/${year}.
+Zaproponuj ${plan.totalPosts} pomysłów na posty na najbliższe 30 dni.
 
 Sezon: ${plan.season}
 Główne tematy: ${plan.themes.join(', ')}
@@ -43,15 +42,12 @@ ${config.toneOfVoice}
 Odpowiedz TYLKO w formacie JSON (tablica):
 [
   {
-    "date": "YYYY-MM-DD",
-    "time": "HH:MM",
     "post_type": "relacyjny|sprzedażowy|treningowy|edukacyjny",
     "topic": "krótki opis tematu posta (1 zdanie)"
   }
 ]
 
-Rozłóż posty równomiernie po tygodniu. Nie planuj w weekendy.
-Zacznij od najbliższego dnia roboczego.
+Zadbaj o różnorodność typów postów. Nie podawaj dat — użytkownik sam wyznaczy terminy.
 `.trim();
 
     try {
@@ -66,11 +62,10 @@ Zacznij od najbliższego dnia roboczego.
         if (!jsonMatch) throw new Error('Claude did not return valid JSON array');
         const postPlan = JSON.parse(jsonMatch[0]);
 
-        // Create draft posts — use date-fns-tz to handle CET/CEST correctly
+        // Create draft posts — no scheduled_at, user sets dates manually before approving
         const drafts = postPlan.map(item => ({
             channel,
             status: 'draft',
-            scheduled_at: fromZonedTime(`${item.date}T${item.time}:00`, 'Europe/Warsaw').toISOString(),
             post_type: item.post_type,
             context_note: item.topic,
             publish_fb: true,
