@@ -23,41 +23,41 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'channel and post_type required' });
     }
 
-    // Fetch partners for channel
-    const { data: partners } = await supabase
-        .from('social_partners')
-        .select('id, name, handle')
-        .eq('channel', channel);
-
-    // Fetch post partners if post_id given (skip query entirely if no post_id)
-    let postPartners = [];
-    if (post_id) {
-        const { data: pp } = await supabase
-            .from('social_post_partners')
-            .select('partner_id')
-            .eq('post_id', post_id);
-        const postPartnerIds = (pp || []).map(r => r.partner_id);
-        postPartners = (partners || []).filter(p => postPartnerIds.includes(p.id));
-    }
-
-    // Fetch learning examples
-    const { data: learningExamples } = await supabase
-        .from('social_learning_examples')
-        .select('*')
-        .eq('channel', channel)
-        .eq('post_type', post_type)
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-    const prompt = buildGenerationPrompt({
-        channel,
-        postType: post_type,
-        contextNote: context_note || '',
-        partners: postPartners,
-        learningExamples: learningExamples || [],
-    });
-
     try {
+        // Fetch partners for channel
+        const { data: partners } = await supabase
+            .from('social_partners')
+            .select('id, name, handle')
+            .eq('channel', channel);
+
+        // Fetch post partners if post_id given (skip query entirely if no post_id)
+        let postPartners = [];
+        if (post_id) {
+            const { data: pp } = await supabase
+                .from('social_post_partners')
+                .select('partner_id')
+                .eq('post_id', post_id);
+            const postPartnerIds = (pp || []).map(r => r.partner_id);
+            postPartners = (partners || []).filter(p => postPartnerIds.includes(p.id));
+        }
+
+        // Fetch learning examples
+        const { data: learningExamples } = await supabase
+            .from('social_learning_examples')
+            .select('*')
+            .eq('channel', channel)
+            .eq('post_type', post_type)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+        const prompt = buildGenerationPrompt({
+            channel,
+            postType: post_type,
+            contextNote: context_note || '',
+            partners: postPartners,
+            learningExamples: learningExamples || [],
+        });
+
         const message = await anthropic.messages.create({
             model: 'claude-sonnet-4-6',
             max_tokens: 1024,
@@ -70,6 +70,10 @@ export default async function handler(req, res) {
         if (!jsonMatch) throw new Error('Claude did not return valid JSON');
         const generated = JSON.parse(jsonMatch[0]);
 
+        if (!generated.fb || !generated.ig) {
+            throw new Error('Claude response missing fb or ig fields');
+        }
+
         // If regenerating (post_id provided), save prev version before updating
         if (post_id) {
             const { data: post } = await supabase
@@ -78,7 +82,7 @@ export default async function handler(req, res) {
                 .eq('id', post_id)
                 .single();
 
-            if (post?.ai_content_fb) {
+            if (post && (post.ai_content_fb || post.ai_content_ig)) {
                 await supabase.from('social_posts').update({
                     prev_ai_content_fb: post.ai_content_fb,
                     prev_ai_content_ig: post.ai_content_ig,
