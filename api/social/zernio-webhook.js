@@ -3,6 +3,7 @@
 // Called by Zernio when a post is published or fails.
 
 import { createClient } from '@supabase/supabase-js';
+import { replenishPost } from './_replenish.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL,
@@ -27,12 +28,20 @@ export default async function handler(req, res) {
     const updates = { status };
     if (published_at) updates.published_at = published_at; // store actual publish time (separate from scheduled_at)
 
-    const { error } = await supabase
+    const { data: updatedRows, error } = await supabase
         .from('social_posts')
         .update(updates)
-        .eq('zernio_post_id', post_id); // Zernio sends its own post ID
+        .eq('zernio_post_id', post_id) // Zernio sends its own post ID
+        .select('channel');
 
     if (error) return res.status(500).json({ error: error.message });
+
+    // Auto-replenish: create a new undated draft to replace the published post
+    if (status === 'published' && updatedRows?.[0]?.channel) {
+        replenishPost(updatedRows[0].channel, supabase).catch(e =>
+            console.error('replenish failed (non-fatal):', e.message)
+        );
+    }
 
     return res.status(200).json({ ok: true });
 }

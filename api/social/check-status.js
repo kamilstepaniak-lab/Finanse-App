@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getZernioPostStatus } from '../../src/lib/social/zernio-client.js';
+import { replenishPost } from './_replenish.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL,
@@ -43,6 +44,11 @@ export default async function handler(req, res) {
                     .update({ status })
                     .eq('id', post.id);
                 updated++;
+                if (status === 'published') {
+                    replenishPost(post.channel, supabase).catch(e =>
+                        console.error('replenish failed (non-fatal):', e.message)
+                    );
+                }
             }
         } catch (e) {
             console.error(`check-status: failed for post ${post.id}:`, e.message);
