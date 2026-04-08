@@ -53,6 +53,38 @@ export default async function handler(req, res) {
             .update({ zernio_post_id })
             .eq('id', post_id);
 
+        // Save learning example if user edited the AI-generated text
+        const userEditedFb = post.final_content_fb && post.final_content_fb !== post.ai_content_fb;
+        const userEditedIg = post.final_content_ig && post.final_content_ig !== post.ai_content_ig;
+
+        if ((userEditedFb || userEditedIg) && post.ai_content_fb && post.post_type) {
+            try {
+                await supabase.from('social_learning_examples').insert([{
+                    channel: post.channel,
+                    post_type: post.post_type,
+                    ai_version_fb: post.ai_content_fb,
+                    ai_version_ig: post.ai_content_ig,
+                    human_version_fb: post.final_content_fb,
+                    human_version_ig: post.final_content_ig,
+                }]);
+
+                // Trim to 50 per (channel, post_type)
+                const { data: rows } = await supabase
+                    .from('social_learning_examples')
+                    .select('id, created_at')
+                    .eq('channel', post.channel)
+                    .eq('post_type', post.post_type)
+                    .order('created_at', { ascending: false });
+
+                if (rows && rows.length > 50) {
+                    const toDelete = rows.slice(50).map(r => r.id);
+                    await supabase.from('social_learning_examples').delete().in('id', toDelete);
+                }
+            } catch (e) {
+                console.error('saveLearningExample failed (non-fatal):', e.message);
+            }
+        }
+
         return res.status(200).json({ ok: true, zernio_post_id });
     } catch (err) {
         await supabase
