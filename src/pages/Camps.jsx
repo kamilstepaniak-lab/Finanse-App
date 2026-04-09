@@ -2,14 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { getAllCamps, addCamp, getCampByName, deleteCamp, updateCamp, renameCampInTransactions, getAllTransactions, subscribeToCamps, unsubscribe } from '../db';
 import { Trash2, Edit2, Check, X, RefreshCw } from 'lucide-react';
 
+// Synced with csvParser.js — program identifiers (hero, prokids, family, sekcja, etc.)
+// are NOT stop-words because they distinguish camps at the same location.
 const STOP_WORDS = new Set([
-    'oboz', 'obóz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus', 'rejs',
+    'oboz', 'wyjazd', 'wycieczka', 'kolonia', 'turnus',
     'lato', 'zima', 'leni', 'zimow', 'ferie', 'wakacje',
     'letni', 'letnia', 'letnie', 'zimowy', 'zimowa', 'zimowe',
-    'sportowy', 'sportowa', 'sportowe', 'sport',
-    'sekcja', 'family', 'hero', 'prokids', 'semipro', 'beeski',
-    'karnet', 'karnety', 'rata', 'doplata',
-    'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka'
+    'sportowy', 'sportowa', 'sportowe',
+    'morski', 'morska', 'gorski', 'gorska',
+    'narciarski', 'narciarska',
+    'mlodziezowy', 'mlodziezowa', 'mlodziezowe',
+    'jezdziecki', 'taneczny', 'muzyczny', 'artystyczny',
+    'karnet', 'karnety',
+    'rata', 'doplata', 'dla', 'oraz', 'przelew', 'oplata', 'wplata',
+    'zaliczka', 'udzial', 'uczestnictwo', 'czesc',
+    'wlochy', 'austria', 'polska'
 ]);
 
 const CHAR_MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z',
@@ -18,10 +25,12 @@ const norm = (s) => s.toLowerCase().split('').map(c => CHAR_MAP[c] || c).join(''
 
 const extractTagsFromName = (name) => {
     const normalized = norm(name)
-        .replace(/\b\d{4}\b/g, ' ')           // usuń lata (2025, 2026...)
-        .replace(/\b\d{1,2}[.\-\/]\d{1,2}([.\-\/]\d{2,4})?\b/g, ' '); // usuń daty
+        .replace(/\d{1,2}[-\/]\d{1,2}[.]\d{1,2}(?:[.\-\/]\d{2,4})?/g, ' ') // ranges: 06-08.03.2026
+        .replace(/\b\d{1,2}[.]\d{1,2}(?:[.]\d{2,4})?\b/g, ' ')              // single: 08.03.2026
+        .replace(/\b\d{4}\b/g, ' ');                                          // bare years: 2025
     return normalized
         .split(/[\s,;\-:()\[\]\/\\]+/)
+        .flatMap(t => t.split(/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/))  // split digit-letter boundaries
         .map(t => t.replace(/[^a-z]/g, ''))
         .filter(t => t.length >= 3 && !STOP_WORDS.has(t));
 };

@@ -106,56 +106,63 @@ export const normalizeTransaction = async (row, camps = []) => {
     // Auto-Categorization
     const autoCategorize = (txt) => {
         const lower = txt.toLowerCase();
+        const lowerNoSpaces = lower.replace(/\s+/g, '');
 
+        // 1. Zwrot (refund) — highest priority
         if (lower.includes('zwrot') || lower.includes('refund') || lower.includes('refundacja')) return 'Zwrot';
 
+        // 2. Nauka pływania (swimming lessons)
         if (
             lower.includes('plywani') ||
-            lower.includes('pływani') ||
             lower.includes('basen') ||
-            lower.includes('pływalnia') ||
+            lower.includes('plywalnia') ||
             lower.includes('awf') ||
             lower.includes('uek') ||
             lower.includes('akf') ||
             /\bup\b/.test(lower)
         ) return 'nauka pływania';
 
-        // Dzień tygodnia + godzina (np. "środa 19.30", "niedziela 18:45") → nauka pływania
-        // Usuń spacje i sprawdź też wariant z literówką (np. "n iedziela")
-        const lowerNoSpaces = lower.replace(/\s+/g, '');
-        const daysOfWeek = ['poniedzialek', 'wtorek', 'sroda', 'czwartek', 'piatek', 'sobota', 'niedziela',
-                            'poniedzialek', 'sroda', 'piatek'];
+        // Dzień tygodnia + godzina (np. "środa 19.30") → nauka pływania
+        const daysOfWeek = ['poniedzialek', 'wtorek', 'sroda', 'czwartek', 'piatek', 'sobota', 'niedziela'];
         const hasDay = daysOfWeek.some(d => lower.includes(d) || lowerNoSpaces.includes(d));
         const hasTime = /\d{1,2}[.,:]\d{2}/.test(lower);
         if (hasDay && hasTime) return 'nauka pływania';
 
+        // 3. usługa turystyczna — BEFORE Szkolenie, so "szkolenie Livigno" → trip, not training
+        // Locations that always indicate a trip/camp
+        const TRIP_LOCATIONS = [
+            'gniewino', 'borek', 'chotowa', 'jastarnia', 'mazury',
+            'livigno', 'kluszkowce', 'piancavallo', 'flachau',
+            'stubai', 'suche', 'jurgow', 'szczyrk', 'turnau',
+            'krynica', 'poronin', 'bialka', 'zakopane', 'ryn',
+            'dluga polana', 'grapa'
+        ];
+        // Activity/product keywords that indicate a trip
+        const TRIP_KEYWORDS = [
+            'oboz', 'turyst', 'pobyt', 'camp', 'rejs',
+            'zeglarski', 'windsurfing', 'adventure', 'summer',
+            'licealist', 'polkolonia', 'kids trophy', 'kidstrophy',
+            'mozn', 'family camp', 'wyjazd', 'wycieczka',
+            'kwatera', 'zakwaterowanie', 'autokar',
+            'zaliczka', 'sekcja camp'
+        ];
+
+        if (TRIP_LOCATIONS.some(loc => lower.includes(loc) || lowerNoSpaces.includes(loc))) {
+            return 'usługa turystyczna';
+        }
+        if (TRIP_KEYWORDS.some(kw => lower.includes(kw) || lowerNoSpaces.includes(kw))) {
+            return 'usługa turystyczna';
+        }
+
+        // 4. Szkolenie (training — only if no trip location detected above)
         if (
             lower.includes('trening') ||
             lower.includes('szkolenie') ||
-            lower.includes('hala')
+            lower.includes('hala') ||
+            lower.includes('hali')
         ) return 'Szkolenie';
 
-        const datePattern = /\d{1,2}[-.]\d{1,2}/;
-        if (
-            lower.includes('obóz') ||
-            lower.includes('oboz') ||
-            lower.includes('turyst') ||
-            lower.includes('pobyt') ||
-            lower.includes('zaliczka') ||
-            lower.includes('wyjazd') ||
-            lower.includes('wycieczka') ||
-            lower.includes('kwatera') ||
-            lower.includes('zakwaterowanie') ||
-            lower.includes('camp') ||
-            lower.includes('rejs') ||
-            lower.includes('zeglarski') ||
-            lower.includes('żeglarski') ||
-            lower.includes('gniewino') ||
-            lower.includes('borek') ||
-            lower.includes('chotowa') ||
-            (datePattern.test(lower) && (lower.includes('krynica') || lower.includes('poronin') || lower.includes('jurgow') || lower.includes('bialka') || lower.includes('zakopane')))
-        ) return 'usługa turystyczna';
-
+        // 5. Other specific categories
         if (lower.includes('czepek')) return 'zakup czepek';
         if (lower.includes('wpisowe')) return 'wpisowe';
         if (lower.includes('faktura')) return 'FAKTURA VAT';
@@ -181,27 +188,47 @@ export const normalizeTransaction = async (row, camps = []) => {
         const CHAR_MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z' };
         const norm = (s) => s.toLowerCase().split('').map(c => CHAR_MAP[c] || c).join('');
 
-        // Stop-words that appear in camp names but carry no matching value
+        // Stop-words: generic terms that appear in many camps and DON'T distinguish them.
+        // IMPORTANT: program identifiers (hero, prokids, family, sekcja, etc.) are NOT stop-words
+        // because they distinguish e.g. "Hero Kluszkowce" from "ProKids Kluszkowce".
         const STOP_WORDS = new Set([
-            'oboz', 'wyjazd', 'wycieczka', 'camp', 'kolonia', 'turnus', 'rejs',
+            // generic camp/trip terms
+            'oboz', 'wyjazd', 'wycieczka', 'kolonia', 'turnus',
+            // seasons
             'lato', 'zima', 'leni', 'zimow', 'ferie', 'wakacje',
-            // przymiotniki obozowe
+            // adjectives
             'letni', 'letnia', 'letnie', 'zimowy', 'zimowa', 'zimowe',
-            'sportowy', 'sportowa', 'sportowe', 'sport',
+            'sportowy', 'sportowa', 'sportowe',
             'morski', 'morska', 'gorski', 'gorska',
             'narciarski', 'narciarska',
             'mlodziezowy', 'mlodziezowa', 'mlodziezowe',
             'jezdziecki', 'taneczny', 'muzyczny', 'artystyczny',
-            // organizacyjne / poziomy programu — pojawiają się w wielu obozach, nie identyfikują konkretnego
-            'sekcja', 'family', 'hero', 'prokids', 'semipro', 'beeski',
-            // produkty dodatkowe
+            // extra products
             'karnet', 'karnety',
-            // słowa płatnicze
-            'rata', 'doplata', 'dla', 'oraz', 'przelew', 'oplata', 'wplata', 'zaliczka', 'udzial', 'uczestnictwo'
+            // payment terms
+            'rata', 'doplata', 'dla', 'oraz', 'przelew', 'oplata', 'wplata',
+            'zaliczka', 'udzial', 'uczestnictwo', 'czesc',
+            // countries (too broad)
+            'wlochy', 'austria', 'polska'
         ]);
 
-        // Extract words >= 3 chars that are not stop-words.
-        // Dates are stripped first so they don't produce garbled tokens like "08032026".
+        // Fuzzy prefix matching for Polish grammar (licealistow vs licealisty, gniewino vs gniewinie)
+        const fuzzyTokenMatch = (token, tokenList) => {
+            if (token.length < 5) return false;
+            for (const other of tokenList) {
+                if (other.length < 4) continue;
+                const maxLen = Math.max(token.length, other.length);
+                let commonLen = 0;
+                const limit = Math.min(token.length, other.length);
+                while (commonLen < limit && token[commonLen] === other[commonLen]) commonLen++;
+                if (commonLen / maxLen >= 0.7) return true;
+            }
+            return false;
+        };
+
+        // Extract meaningful tokens from a string.
+        // Dates stripped first. Split on whitespace, punctuation, AND digit-letter boundaries
+        // so "SPORT1KRAKOW" becomes ["sport", "krakow"] instead of "sportkrakow".
         const extractTokens = (str) => {
             const withoutDates = norm(str)
                 .replace(/\d{1,2}[-\/]\d{1,2}[.]\d{1,2}(?:[.\-\/]\d{2,4})?/g, ' ') // ranges: 06-08.03.2026
@@ -210,12 +237,12 @@ export const normalizeTransaction = async (row, camps = []) => {
 
             return withoutDates
                 .split(/[\s,;\-:()\[\]\/\\]+/)
-                .map(t => t.replace(/[^a-z]/g, ''))   // letters only — no digits in word tokens
+                .flatMap(t => t.split(/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/))  // split digit-letter boundaries
+                .map(t => t.replace(/[^a-z]/g, ''))   // letters only
                 .filter(t => t.length >= 3 && !STOP_WORDS.has(t));
         };
 
         // Normalize dates from a string into a Set of "day.month" strings
-        // Handles: "7-8.03", "7-8.03.2025", "08.03", "8.03.2025", "7/8.03"
         const extractDates = (str) => {
             const dates = new Set();
             const s = norm(str);
@@ -252,12 +279,10 @@ export const normalizeTransaction = async (row, camps = []) => {
 
         let bestMatch = '';
         let highestScore = 0;
-        let bestHadTagBonus = false;
-        let bestTokenRatio = 0;
         let bestHasAnyMatch = false;
         let isTie = false;
-        let tieCandidates = []; // track all camps with equal top score for date tie-breaking
-        let significantCamps = 0;
+        let tieCandidates = [];
+        let campsWithAnyMatch = 0; // count camps that have at least 1 token match
 
         for (const c of campsList) {
             const cTokens = extractTokens(c.name);
@@ -269,30 +294,26 @@ export const normalizeTransaction = async (row, camps = []) => {
 
             if (cTokens.length === 0 && extraTags.length === 0) continue;
 
+            // Single unified loop — score each camp token with priority: exact > fuzzy > no-spaces
             let matchingTokens = 0;
 
             for (const token of cTokens) {
-                // Exact token match
                 if (tTokens.includes(token)) {
-                    matchingTokens += 1;
-                    continue;
-                }
-                // Root match: strip last char to handle Polish grammar (e.g. "gniewinie" → "gniewino")
-                const root = token.length >= 4 ? token.slice(0, -1) : null;
-                if (root && tNorm.includes(root)) {
-                    matchingTokens += 0.7;
+                    matchingTokens += 1;                        // exact match
+                } else if (fuzzyTokenMatch(token, tTokens)) {
+                    matchingTokens += 0.8;                      // fuzzy prefix match (Polish grammar)
+                } else if (tNormNoSpaces.includes(token)) {
+                    matchingTokens += 0.7;                      // no-spaces match (typos like "JASTAR NIA")
                 }
             }
 
             // Date bonus: each date from the camp name that appears in the title
             let dateBonus = 0;
             for (const d of cDates) {
-                if (tDates.has(d)) {
-                    dateBonus += 1;
-                }
+                if (tDates.has(d)) dateBonus += 1;
             }
 
-            // Tag bonus: extra tags (not already in name tokens) — also check without spaces for typos
+            // Tag bonus: extra tags (not already in name tokens)
             let tagBonus = 0;
             for (const tag of extraTags) {
                 if (tNorm.includes(tag) || tNormNoSpaces.includes(tag)) {
@@ -300,25 +321,17 @@ export const normalizeTransaction = async (row, camps = []) => {
                 }
             }
 
-            // Also check cTokens against no-spaces version (catches typos like "Choto wa")
-            for (const token of cTokens) {
-                if (!tTokens.includes(token) && tNormNoSpaces.includes(token)) {
-                    matchingTokens += 0.8;
-                }
-            }
-
-            const totalItems = cTokens.length + cDates.size + extraTags.length * 2;
-            const score = totalItems > 0 ? (matchingTokens + dateBonus + tagBonus) / totalItems : 0;
-            const tokenMatchRatio = cTokens.length > 0 ? matchingTokens / cTokens.length : 0;
+            const totalItems = cTokens.length + cDates.size;
+            const campCoverage = totalItems > 0 ? (matchingTokens + dateBonus + tagBonus) / totalItems : 0;
+            const txCoverage = tTokens.length > 0 ? Math.max(matchingTokens / tTokens.length, 0.15) : 1;
+            const score = campCoverage * txCoverage;
             const hasAnyMatch = matchingTokens > 0 || dateBonus > 0 || tagBonus > 0;
 
-            if (score > 0.15 && hasAnyMatch) significantCamps++;
+            if (matchingTokens >= 1) campsWithAnyMatch++;
 
             if (score > highestScore) {
                 highestScore = score;
                 bestMatch = c.name;
-                bestHadTagBonus = tagBonus > 0;
-                bestTokenRatio = tokenMatchRatio;
                 bestHasAnyMatch = hasAnyMatch;
                 isTie = false;
                 tieCandidates = [{ name: c.name, cDates }];
@@ -328,12 +341,12 @@ export const normalizeTransaction = async (row, camps = []) => {
             }
         }
 
-        if (significantCamps >= 3) return { camp: '', needsReview: true };
+        // Multi-camp transaction: 3+ camps have token matches -> flag for manual split/review
+        if (campsWithAnyMatch >= 3) return { camp: bestMatch || '', needsReview: true };
 
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
         // Tie-breaker: use transaction date proximity to pick best camp
-        // e.g. "Suche 12-14.12" vs "Suche 19-22.12" — choose the one whose dates are closest to transaction date
         if (isTie && transactionDate && tieCandidates.length > 1) {
             const tDate = new Date(transactionDate);
             let closestName = null;
@@ -341,7 +354,6 @@ export const normalizeTransaction = async (row, camps = []) => {
             for (const candidate of tieCandidates) {
                 for (const d of candidate.cDates) {
                     const [day, month] = d.split('.').map(Number);
-                    // Try same year and adjacent years
                     for (const yr of [tDate.getFullYear(), tDate.getFullYear() + 1, tDate.getFullYear() - 1]) {
                         const campDate = new Date(yr, month - 1, day);
                         const diff = Math.abs((tDate - campDate) / (1000 * 60 * 60 * 24));
@@ -352,7 +364,6 @@ export const normalizeTransaction = async (row, camps = []) => {
                     }
                 }
             }
-            // Only use date tie-breaker if within 90 days
             if (closestName && closestDiff <= 90) {
                 return { camp: closestName, needsReview: false };
             }
@@ -361,9 +372,9 @@ export const normalizeTransaction = async (row, camps = []) => {
         // Certain match: no tie AND at least one keyword hit
         const isCertain = !isTie && bestHasAnyMatch;
 
-        // Tie: still assign best candidate but flag for review
         if (isCertain) return { camp: bestMatch, needsReview: false };
         if (highestScore >= 0.3) return { camp: bestMatch, needsReview: true };
+        if (bestMatch && highestScore > 0) return { camp: bestMatch, needsReview: true };
         return { camp: '', needsReview: true };
     };
 
