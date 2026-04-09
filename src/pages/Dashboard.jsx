@@ -10,7 +10,7 @@ import {
     deleteTransaction,
     deleteTransactions,
     getAllTransactionsIncludingDeleted,
-    getUnmatchedTransactions,
+    getUnprocessedTransactions,
     clearAllTransactions,
     logActivity,
     subscribeToTransactions,
@@ -19,7 +19,7 @@ import {
     unsubscribe
 } from '../db';
 import { parseCSV, normalizeTransaction } from '../utils/csvParser';
-import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle } from 'lucide-react';
+import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Bot } from 'lucide-react';
 import './Dashboard.css';
 
 export default function Dashboard() {
@@ -230,35 +230,41 @@ export default function Dashboard() {
             let confirmedCount = 0;
             const requiresCamp = (category) => category && category.toLowerCase().includes('usługa turystyczna');
 
-            // Pobierz z bazy TYLKO transakcje bez obozu — nie ładuje całej historii.
-            // Potwierdzone (needs_review=false) i niepewne z obozen są pomijane po stronie DB.
-            const unmatched = await getUnmatchedTransactions();
+            // Pobierz z bazy TYLKO transakcje gdzie auto_processed=false/null.
+            // Reszta (już przetworzona przez algorytm) jest pomijana — co admin z nimi zrobił nie ma znaczenia.
+            const unprocessed = await getUnprocessedTransactions();
 
-            for (const t of unmatched) {
+            if (unprocessed.length === 0) {
+                alert('Brak nowych transakcji do przetworzenia — algorytm już wszystko przejrzał.');
+                return;
+            }
+
+            for (const t of unprocessed) {
                 const mockedRow = [t.date, t.amount, t.currency || 'PLN', t.sender, t.title];
                 const normalizedResult = await normalizeTransaction(mockedRow, camps);
+                const requiresCampForThis = requiresCamp(t.category || normalizedResult.category);
 
-                // Transakcje nie wymagające obozu (kategoria inna niż usługa turystyczna)
-                if (!requiresCamp(t.category || normalizedResult.category)) {
-                    await updateTransaction(t.id, { needs_review: false });
+                const updates = { auto_processed: true };  // zawsze oznacz jako przetworzone
+
+                if (!requiresCampForThis) {
+                    updates.needs_review = false;
                     confirmedCount++;
-                    continue;
+                } else if (normalizedResult.camp) {
+                    updates.camp = normalizedResult.camp;
+                    updates.needs_review = normalizedResult.needsReview;
+                    updatedCount++;
+                } else {
+                    updates.needs_review = true;  // brak dopasowania — do przejrzenia
                 }
 
-                if (normalizedResult.camp) {
-                    await updateTransaction(t.id, {
-                        camp: normalizedResult.camp,
-                        needs_review: normalizedResult.needsReview,
-                    });
-                    updatedCount++;
-                }
-                // Jeśli nadal brak dopasowania — zostawiamy needs_review=true i camp='' (bez zmiany)
+                await updateTransaction(t.id, updates);
             }
 
             const msgs = [];
             if (updatedCount > 0) msgs.push(`Dopasowano obóz do ${updatedCount} transakcji`);
             if (confirmedCount > 0) msgs.push(`Potwierdzono kategorię dla ${confirmedCount} transakcji`);
-            if (msgs.length === 0) msgs.push('Brak nowych transakcji do dopasowania');
+            const skipped = unprocessed.length - updatedCount - confirmedCount;
+            if (skipped > 0) msgs.push(`${skipped} bez dopasowania — do ręcznego uzupełnienia`);
             alert(msgs.join('\n'));
         } catch (e) {
             console.error(e);
@@ -426,6 +432,7 @@ export default function Dashboard() {
                 category: t.category,
                 camp: t.camp,
                 needs_review: t.needsReview ?? false,
+                auto_processed: true,   // algorytm widział tę transakcję podczas importu
                 source_file: t.sourceFile
             }));
 
@@ -1077,6 +1084,9 @@ export default function Dashboard() {
                                 <tr className={t.needs_review ? (t.camp ? 'needs-review-uncertain' : 'needs-review-missing') : ''} style={selectedIds.has(t.id) ? { background: '#fef2f2' } : {}}>
                                     <td style={{ padding: '4px 8px', textAlign: 'center' }}>
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                            {t.auto_processed && (
+                                                <Bot size={11} title="Algorytm już przetworzył tę transakcję" style={{ color: '#A3AED0', flexShrink: 0 }} />
+                                            )}
                                             {children.length > 0 && (
                                                 <button
                                                     onClick={() => toggleExpand(t.id)}

@@ -18,20 +18,19 @@ export const getAllTransactions = async () => {
     return data || [];
 };
 
-// Tylko transakcje bez przypisanego obozu (czerwone wiersze) — używane przez auto-dopasuj.
-// Pobiera z bazy WYŁĄCZNIE to co potrzebne, bez ładowania całej historii.
-export const getUnmatchedTransactions = async () => {
+// Transakcje których algorytm jeszcze nie przetworzył (auto_processed IS NULL lub FALSE).
+// Używane przez auto-dopasuj — pobiera tylko to co potrzebne, bez ładowania całej historii.
+export const getUnprocessedTransactions = async () => {
     const { data, error } = await supabase
         .from('transactions')
-        .select('id, date, amount, currency, sender, title, category, camp, needs_review, parent_id')
+        .select('id, date, amount, currency, sender, title, category, camp, needs_review, parent_id, auto_processed')
         .neq('is_deleted', true)
-        .is('parent_id', null)        // tylko rodzice (nie dzieci podziałów)
-        .neq('needs_review', false)   // pomijaj potwierdzone
-        .or('camp.is.null,camp.eq.')  // camp jest NULL lub pusty string
+        .is('parent_id', null)           // tylko rodzice (nie dzieci podziałów)
+        .or('auto_processed.is.null,auto_processed.eq.false')  // nigdy nie przetworzone
         .order('date', { ascending: false });
 
     if (error) {
-        console.error('Error fetching unmatched transactions:', error);
+        console.error('Error fetching unprocessed transactions:', error);
         return [];
     }
     return data || [];
