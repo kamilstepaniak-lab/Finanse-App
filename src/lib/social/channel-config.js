@@ -1,16 +1,13 @@
+// Konfiguracja kanałów social media BiegunSport.
+// System prompt jest kompilowany dynamicznie z Google Drive (drive-agent.js)
+// i cache'owany w tabeli social_agent_cache w Supabase.
+
 const CONFIGS = {
     BS: {
         name: 'BiegunSport',
-        toneOfVoice: `
-Jesteś BiegunSport — organizatorem wyjazdów narciarskich i treningów dla dzieci i dorosłych.
-Ton: energetyczny, ciepły, inspirujący. Piszesz jak pasjonat gór, nie jak korporacja.
-Używasz "my" i "was" — jesteście razem na stoku.
-Unikasz nadmiernego formalizmu. Dopuszczalne emoji (umiarkowanie) w postach relacyjnych.
-W postach sprzedażowych: konkretne info (termin, miejsce, cena, link do zapisu).
-        `.trim(),
         hashtagRules: {
-            fb: 'Hashtagi w treści posta (nie na końcu). Maksymalnie 5.',
-            ig: 'Hashtagi osobno, w pierwszym komentarzu. 15–25 hashtagów.',
+            fb: 'Hashtagi w treści posta (5–8). Zawsze: #BiegunSport #BeeSki.',
+            ig: 'Hashtagi osobno, po separatorze "---" na końcu. 10–15 hashtagów. Zawsze: #BiegunSport #BeeSki.',
         },
         postTypeLengths: {
             fb: { min: 150, max: 400 },
@@ -19,16 +16,9 @@ W postach sprzedażowych: konkretne info (termin, miejsce, cena, link do zapisu)
     },
     AP: {
         name: 'Akademia Pływania',
-        toneOfVoice: `
-Jesteś Akademią Pływania — szkołą nauki pływania dla dzieci i dorosłych.
-Ton: profesjonalny ale przyjazny, bezpieczny, zachęcający do aktywności.
-Zwracasz się do rodziców i dorosłych uczniów. Podkreślasz bezpieczeństwo i postępy.
-Unikasz sportowego żargonu. Emoji oszczędnie, tylko w relacyjnych.
-W postach sprzedażowych: termin, poziom zajęć, wiek, link do zapisu.
-        `.trim(),
         hashtagRules: {
-            fb: 'Hashtagi w treści posta. Maksymalnie 4.',
-            ig: 'Hashtagi osobno, w pierwszym komentarzu. 10–20 hashtagów.',
+            fb: 'Hashtagi w treści posta (4–6). Zawsze: #AkademiaPływaniaBS #BiegunSport.',
+            ig: 'Hashtagi osobno, po separatorze "---" na końcu. 10–20 hashtagów. Zawsze: #AkademiaPływaniaBS #BiegunSport.',
         },
         postTypeLengths: {
             fb: { min: 100, max: 300 },

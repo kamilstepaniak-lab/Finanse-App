@@ -25,12 +25,6 @@ ${learningExamples.map((ex, i) => `
         : '';
 
     return `
-Jesteś copywriterem dla ${config.name}.
-
-## Reguły kanału
-
-${config.toneOfVoice}
-
 ## Reguły hashtagów
 
 Facebook: ${config.hashtagRules.fb}

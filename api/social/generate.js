@@ -24,13 +24,26 @@ export default async function handler(req, res) {
     }
 
     try {
+        // Load system prompt from cache (compiled from Google Drive)
+        const { data: agentCache } = await supabase
+            .from('social_agent_cache')
+            .select('system_prompt, updated_at')
+            .eq('channel', channel)
+            .single();
+
+        if (!agentCache) {
+            return res.status(400).json({
+                error: `Brak systemu agenta dla kanału ${channel}. Kliknij "Odśwież agenta" aby załadować prompt z Google Drive.`,
+            });
+        }
+
         // Fetch partners for channel
         const { data: partners } = await supabase
             .from('social_partners')
             .select('id, name, handle')
             .eq('channel', channel);
 
-        // Fetch post partners if post_id given (skip query entirely if no post_id)
+        // Fetch post partners if post_id given
         let postPartners = [];
         if (post_id) {
             const { data: pp } = await supabase
@@ -50,7 +63,7 @@ export default async function handler(req, res) {
             .order('created_at', { ascending: false })
             .limit(5);
 
-        const prompt = buildGenerationPrompt({
+        const userPrompt = buildGenerationPrompt({
             channel,
             postType: post_type,
             contextNote: context_note || '',
@@ -59,13 +72,19 @@ export default async function handler(req, res) {
         });
 
         const message = await anthropic.messages.create({
-            model: 'claude-3-5-sonnet-20241022',
+            model: 'claude-sonnet-4-6',
             max_tokens: 1024,
-            messages: [{ role: 'user', content: prompt }],
+            system: [
+                {
+                    type: 'text',
+                    text: agentCache.system_prompt,
+                    cache_control: { type: 'ephemeral' },
+                },
+            ],
+            messages: [{ role: 'user', content: userPrompt }],
         });
 
         const raw = message.content[0].text.trim();
-        // Parse JSON response
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error('Claude did not return valid JSON');
         const generated = JSON.parse(jsonMatch[0]);
