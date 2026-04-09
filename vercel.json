@@ -7,7 +7,7 @@
   "crons": [
     {
       "path": "/api/social/check-status",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }
