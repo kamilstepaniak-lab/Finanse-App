@@ -15,6 +15,7 @@
     "@anthropic-ai/sdk": "^0.85.0",
     "@supabase/supabase-js": "^2.39.0",
     "@vercel/blob": "^2.3.3",
+    "date-fns-tz": "^3.2.0",
     "googleapis": "^171.4.0",
     "lucide-react": "^0.562.0",
     "papaparse": "^5.5.3",
