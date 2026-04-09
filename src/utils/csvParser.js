@@ -119,6 +119,8 @@ export const normalizeTransaction = async (row, camps = []) => {
             lower.includes('awf') ||
             lower.includes('uek') ||
             lower.includes('akf') ||
+            lower.includes('swimming') ||
+            lower.includes('plywanie dowolne') ||
             /\bup\b/.test(lower)
         ) return 'nauka pływania';
 
@@ -144,7 +146,9 @@ export const normalizeTransaction = async (row, camps = []) => {
             'licealist', 'polkolonia', 'kids trophy', 'kidstrophy',
             'mozn', 'family camp', 'wyjazd', 'wycieczka',
             'kwatera', 'zakwaterowanie', 'autokar',
-            'zaliczka', 'sekcja camp'
+            'zaliczka', 'sekcja camp',
+            'hero', 'prokids', 'sekcja', 'mpp',
+            'liga', 'semi', 'karnet', 'sport camp', 'sport chill'
         ];
 
         if (TRIP_LOCATIONS.some(loc => lower.includes(loc) || lowerNoSpaces.includes(loc))) {
@@ -182,8 +186,8 @@ export const normalizeTransaction = async (row, camps = []) => {
 
     // Smart Camp Assignment (Wyjazd)
     // Returns: { camp: string, needsReview: boolean }
-    const attemptAutoAssignCamp = (textToSearch, campsList, transactionDate) => {
-        if (!campsList || campsList.length === 0 || !textToSearch) return { camp: '', needsReview: false };
+    const attemptAutoAssignCamp = ({ title: searchTitle, sender: searchSender }, campsList, transactionDate) => {
+        if (!campsList || campsList.length === 0 || (!searchTitle && !searchSender)) return { camp: '', needsReview: false };
 
         const CHAR_MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z' };
         const norm = (s) => s.toLowerCase().split('').map(c => CHAR_MAP[c] || c).join('');
@@ -278,12 +282,34 @@ export const normalizeTransaction = async (row, camps = []) => {
             return m ? parseInt(m[1]) : null;
         };
 
-        const tNorm = norm(textToSearch);
-        const tNormNoSpaces = tNorm.replace(/\s+/g, '');
-        const tTokens = extractTokens(textToSearch);
-        const tDates = extractDates(textToSearch);
+        // Score title and sender SEPARATELY to avoid sender noise diluting matches
+        const titleNorm = norm(searchTitle || '');
+        const senderNorm = norm(searchSender || '');
+        const combinedNorm = norm(`${searchTitle || ''} ${searchSender || ''}`);
+        const titleNormNoSpaces = titleNorm.replace(/\s+/g, '');
+        const combinedNormNoSpaces = combinedNorm.replace(/\s+/g, '');
+        const titleTokens = extractTokens(searchTitle || '');
+        const senderTokens = extractTokens(searchSender || '');
+        const allTokens = [...new Set([...titleTokens, ...senderTokens])];
+        const tDates = extractDates(`${searchTitle || ''} ${searchSender || ''}`);
         const txYear = transactionDate ? new Date(transactionDate).getFullYear() : null;
-        const txTitleYear = extractYear(textToSearch); // year mentioned in the transfer title
+        const txTitleYear = extractYear(searchTitle || ''); // year mentioned in the transfer title
+        const txMonth = transactionDate ? new Date(transactionDate).getMonth() + 1 : null;
+
+        // Helper: compute matching tokens for a set of transaction tokens against camp tokens
+        const computeMatchingTokens = (cTokens, txTokens, normNoSpaces) => {
+            let matching = 0;
+            for (const token of cTokens) {
+                if (txTokens.includes(token)) {
+                    matching += 1;                        // exact match
+                } else if (fuzzyTokenMatch(token, txTokens)) {
+                    matching += 0.8;                      // fuzzy prefix match (Polish grammar)
+                } else if (normNoSpaces.includes(token)) {
+                    matching += 0.7;                      // no-spaces match (typos like "JASTAR NIA")
+                }
+            }
+            return matching;
+        };
 
         let bestMatch = '';
         let highestScore = 0;
@@ -291,6 +317,7 @@ export const normalizeTransaction = async (row, camps = []) => {
         let bestHasAnyMatch = false;
         let tieCandidates = [];       // camps within ~5% of best score for date tie-breaking
         let campsWithSignificantMatch = 0; // camps where >=50% of their tokens match
+        let campsWithAnyMatch = 0;    // camps with any token/date/tag match at all
 
         for (const c of campsList) {
             const cTokens = extractTokens(c.name);
@@ -302,18 +329,10 @@ export const normalizeTransaction = async (row, camps = []) => {
 
             if (cTokens.length === 0 && extraTags.length === 0) continue;
 
-            // Single unified loop — score each camp token with priority: exact > fuzzy > no-spaces
-            let matchingTokens = 0;
-
-            for (const token of cTokens) {
-                if (tTokens.includes(token)) {
-                    matchingTokens += 1;                        // exact match
-                } else if (fuzzyTokenMatch(token, tTokens)) {
-                    matchingTokens += 0.8;                      // fuzzy prefix match (Polish grammar)
-                } else if (tNormNoSpaces.includes(token)) {
-                    matchingTokens += 0.7;                      // no-spaces match (typos like "JASTAR NIA")
-                }
-            }
+            // Score title tokens separately — prevents sender noise from diluting score
+            const titleMatching = computeMatchingTokens(cTokens, titleTokens, titleNormNoSpaces);
+            // Score combined (title + sender) — catches camp name appearing in sender
+            const combinedMatching = computeMatchingTokens(cTokens, allTokens, combinedNormNoSpaces);
 
             // Date bonus: each date from the camp name that appears in the title
             let dateBonus = 0;
@@ -321,41 +340,54 @@ export const normalizeTransaction = async (row, camps = []) => {
                 if (tDates.has(d)) dateBonus += 1;
             }
 
-            // Tag bonus: extra tags (not already in name tokens)
+            // Tag bonus: extra tags (not already in name tokens) — check against combined text
             let tagBonus = 0;
             for (const tag of extraTags) {
-                if (tNorm.includes(tag) || tNormNoSpaces.includes(tag)) {
+                if (combinedNorm.includes(tag) || combinedNormNoSpaces.includes(tag)) {
                     tagBonus += 2;
                 }
             }
 
             const totalItems = cTokens.length + cDates.size;
-            const campCoverage = totalItems > 0 ? (matchingTokens + dateBonus + tagBonus) / totalItems : 0;
-            const txCoverage = tTokens.length > 0 ? Math.max(matchingTokens / tTokens.length, 0.15) : 1;
-            let score = campCoverage * txCoverage;
+
+            // Title-only score (higher precision, not diluted by sender tokens)
+            const titleCampCoverage = totalItems > 0 ? (titleMatching + dateBonus + tagBonus) / totalItems : 0;
+            const titleTxCoverage = titleTokens.length > 0 ? Math.max(titleMatching / titleTokens.length, 0.2) : 1;
+            const titleScore = titleCampCoverage * titleTxCoverage;
+
+            // Combined score (broader recall, uses all tokens)
+            const combinedCampCoverage = totalItems > 0 ? (combinedMatching + dateBonus + tagBonus) / totalItems : 0;
+            const combinedTxCoverage = allTokens.length > 0 ? Math.max(combinedMatching / allTokens.length, 0.15) : 1;
+            const combinedScore = combinedCampCoverage * combinedTxCoverage;
+
+            // Final score: title has priority, combined score discounted
+            let score = Math.max(titleScore, combinedScore * 0.7);
 
             // ── Year-awareness: bind transactions to the correct season ──
-            // If camp name contains a year (e.g. "Gniewino 2026"), compare with transaction year.
-            // This prevents 2026 transactions matching 2027 camps when both exist.
-            // c.year is the explicit year field set in Wyjazdy; fallback to year parsed from name.
             const campYear = c.year || extractYear(c.name);
-            const referenceYear = txTitleYear || txYear; // prefer year from title, fallback to tx date
+            const referenceYear = txTitleYear || txYear;
             if (campYear && referenceYear) {
                 const yearDiff = Math.abs(campYear - referenceYear);
                 if (yearDiff === 0) {
                     score *= 1.1;   // slight bonus — correct year
                 } else if (yearDiff === 1) {
-                    score *= 0.25;  // heavy penalty — adjacent year (could be advance/late payment)
+                    // Exception: Oct-Dec payments for next-year winter camps
+                    if (campYear === referenceYear + 1 && txMonth >= 10 && c.season === 'zima') {
+                        score *= 0.9;   // minor penalty — advance winter payment
+                    } else {
+                        score *= 0.25;  // heavy penalty — adjacent year
+                    }
                 } else {
                     score *= 0.05;  // near-eliminate — 2+ years apart
                 }
             }
 
-            const hasAnyMatch = matchingTokens > 0 || dateBonus > 0 || tagBonus > 0;
+            const hasAnyMatch = titleMatching > 0 || combinedMatching > 0 || dateBonus > 0 || tagBonus > 0;
 
-            // Count "significant" matches (>=50% of camp tokens) for multi-camp detection
-            const matchRatio = cTokens.length > 0 ? matchingTokens / cTokens.length : 0;
+            // Count matches for confidence logic
+            const matchRatio = cTokens.length > 0 ? combinedMatching / cTokens.length : 0;
             if (matchRatio >= 0.5) campsWithSignificantMatch++;
+            if (hasAnyMatch && score > 0) campsWithAnyMatch++;
 
             // Track best, second-best, and near-ties
             if (score > highestScore) {
@@ -366,24 +398,30 @@ export const normalizeTransaction = async (row, camps = []) => {
                 tieCandidates = [{ name: c.name, cDates }];
             } else if (score > secondBestScore) {
                 secondBestScore = score;
-                // Also track as tie candidate if within 10% of best
                 if (highestScore > 0 && (highestScore - score) / highestScore < 0.1) {
                     tieCandidates.push({ name: c.name, cDates });
                 }
             }
         }
 
-        // ── Decision logic based on confidence gap ──
+        // ── Decision logic based on confidence ──
 
-        // Multi-camp: 3+ camps have significant (>=50%) token matches → manual split needed
+        // 1. Multi-camp: 3+ camps have significant (>=50%) token matches → manual split needed
         if (campsWithSignificantMatch >= 3) return { camp: bestMatch || '', needsReview: true };
 
+        // 2. No match at all
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
+
+        // 3. SINGLE CAMP MATCH — if exactly one camp scored, auto-approve regardless of score
+        //    e.g. "Gniewino" matches only one camp → no ambiguity → approve
+        if (campsWithAnyMatch === 1 && bestHasAnyMatch) {
+            return { camp: bestMatch, needsReview: false };
+        }
 
         const scoreGap = highestScore - secondBestScore;
         const relativeGap = highestScore > 0 ? scoreGap / highestScore : 1;
 
-        // Near-tie: scores within 10% — try date proximity to pick winner
+        // 4. Near-tie: scores within 10% — try date proximity to pick winner
         if (relativeGap < 0.1 && tieCandidates.length > 1 && transactionDate) {
             const tDate = new Date(transactionDate);
             let closestName = null;
@@ -404,26 +442,25 @@ export const normalizeTransaction = async (row, camps = []) => {
             if (closestName && closestDiff <= 90) {
                 return { camp: closestName, needsReview: false };
             }
-            // Date tie-break failed → review
             return { camp: bestMatch, needsReview: true };
         }
 
-        // Confident match: clear winner with meaningful gap over runner-up
-        const isConfident = bestHasAnyMatch && highestScore >= 0.1 && (
+        // 5. Clear winner: meaningful gap over runner-up (lowered thresholds)
+        const isConfident = bestHasAnyMatch && highestScore >= 0.05 && (
             secondBestScore === 0 ||    // only one camp matched at all
-            relativeGap >= 0.25         // winner is >=25% better than runner-up
+            relativeGap >= 0.15         // winner is >=15% better than runner-up (was 25%)
         );
 
         if (isConfident) return { camp: bestMatch, needsReview: false };
 
-        // Weak/ambiguous match — assign best guess but flag for review
+        // 6. Weak/ambiguous match — assign best guess but flag for review
         if (bestMatch && highestScore > 0) return { camp: bestMatch, needsReview: true };
         return { camp: '', needsReview: true };
     };
 
     const requiresCamp = category && category.toLowerCase().includes('usługa turystyczna');
     const matchResult = requiresCamp
-        ? attemptAutoAssignCamp(`${title} ${sender}`, camps, date)
+        ? attemptAutoAssignCamp({ title, sender }, camps, date)
         : { camp: '', needsReview: false };
     let assignedCamp = matchResult.camp;
     let needsReview = matchResult.needsReview;

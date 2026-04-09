@@ -51,6 +51,7 @@ export default function Camps() {
     const [loading, setLoading] = useState(true);
     const [sortOrder, setSortOrder] = useState('asc');
     const [filterSeason, setFilterSeason] = useState('');
+    const [filterYear, setFilterYear] = useState('');
 
     // Orphaned camp repair
     const [orphanedCamps, setOrphanedCamps] = useState([]);
@@ -185,6 +186,28 @@ export default function Camps() {
         await updateCamp(camp.id, { tags: merged });
     };
 
+    const handleAutoFillYears = async () => {
+        const campsWithoutYear = (camps || []).filter(c => !c.year);
+        if (campsWithoutYear.length === 0) {
+            alert('Wszystkie obozy mają już przypisany rok!');
+            return;
+        }
+        let updated = 0;
+        for (const camp of campsWithoutYear) {
+            // Try to extract year from name first
+            const yearMatch = camp.name.match(/\b(20\d{2})\b/);
+            let year = yearMatch ? parseInt(yearMatch[1]) : null;
+            // If no year in name, assign based on season
+            if (!year && camp.season === 'zima') year = 2025;
+            if (!year && camp.season === 'lato') year = 2026;
+            if (!year) year = currentYear; // fallback
+            setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, year } : c));
+            await updateCamp(camp.id, { year });
+            updated++;
+        }
+        alert(`Uzupełniono rok dla ${updated} obozów.`);
+    };
+
     const handleSeasonChange = async (camp, newSeason) => {
         const season = camp.season === newSeason ? '' : newSeason;
         setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, season } : c));
@@ -243,21 +266,33 @@ export default function Camps() {
 
     const filteredCamps = [...(camps || [])]
         .filter(c => !filterSeason || c.season === filterSeason)
+        .filter(c => !filterYear || String(c.year) === filterYear)
         .sort((a, b) => {
             if (sortOrder === 'asc') return a.name.localeCompare(b.name);
             return 0;
         });
 
+    const availableYears = [...new Set((camps || []).map(c => c.year).filter(Boolean))].sort();
+
     return (
         <div className="card">
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                 <h3>Zarządzanie Wyjazdami</h3>
-                <button
-                    onClick={() => setSortOrder(sortOrder === 'asc' ? 'none' : 'asc')}
-                    style={{ padding: '6px 12px', background: sortOrder === 'asc' ? '#e0e5f2' : 'transparent', border: '1px solid #e0e5f2', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#2b3674', fontWeight: 600 }}
-                >
-                    {sortOrder === 'asc' ? 'Zresetuj sortowanie' : 'Sortuj A-Z'}
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                        onClick={handleAutoFillYears}
+                        title="Uzupełnij brakujące lata: zima→2025, lato→2026 (lub z nazwy obozu)"
+                        style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #e0e5f2', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#2b3674', fontWeight: 600 }}
+                    >
+                        Uzupełnij lata
+                    </button>
+                    <button
+                        onClick={() => setSortOrder(sortOrder === 'asc' ? 'none' : 'asc')}
+                        style={{ padding: '6px 12px', background: sortOrder === 'asc' ? '#e0e5f2' : 'transparent', border: '1px solid #e0e5f2', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#2b3674', fontWeight: 600 }}
+                    >
+                        {sortOrder === 'asc' ? 'Zresetuj sortowanie' : 'Sortuj A-Z'}
+                    </button>
+                </div>
             </div>
 
             <div style={{ padding: '24px' }}>
@@ -348,8 +383,8 @@ export default function Camps() {
                     </div>
                 </div>
 
-                {/* Season filter */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                {/* Season + Year filter */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
                     {[['','Wszystkie','#4318FF'],['lato','☀️ Letnie','#B45309'],['zima','❄️ Zimowe','#1570EF']].map(([val, label, color]) => (
                         <button
                             key={val}
@@ -359,6 +394,20 @@ export default function Camps() {
                                 border: `1px solid ${filterSeason === val ? color : '#e0e5f2'}`,
                                 background: filterSeason === val ? color : '#fff',
                                 color: filterSeason === val ? '#fff' : '#64748B'
+                            }}
+                        >{label}</button>
+                    ))}
+                    <div style={{ width: '1px', height: '24px', background: '#e0e5f2', margin: '0 4px' }} />
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748B' }}>Rok:</span>
+                    {[['','Wszystkie'],  ...availableYears.map(y => [String(y), String(y)])].map(([val, label]) => (
+                        <button
+                            key={val}
+                            onClick={() => setFilterYear(val)}
+                            style={{
+                                padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                                border: `1px solid ${filterYear === val ? '#4318FF' : '#e0e5f2'}`,
+                                background: filterYear === val ? '#4318FF' : '#fff',
+                                color: filterYear === val ? '#fff' : '#64748B'
                             }}
                         >{label}</button>
                     ))}

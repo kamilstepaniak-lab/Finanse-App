@@ -19,8 +19,14 @@ import {
     unsubscribe
 } from '../db';
 import { parseCSV, normalizeTransaction } from '../utils/csvParser';
-import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Zap } from 'lucide-react';
+import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Zap, Calendar } from 'lucide-react';
 import './Dashboard.css';
+
+// Normalize strings for deduplication — collapse whitespace, lowercase
+const normalizeDedupKey = (str) => {
+    if (!str) return '';
+    return str.trim().replace(/\s+/g, ' ').toLowerCase();
+};
 
 export default function Dashboard() {
     const [transactions, setTransactions] = useState([]);
@@ -38,6 +44,7 @@ export default function Dashboard() {
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' });
     const [loading, setLoading] = useState(true);
     const [filterReview, setFilterReview] = useState(''); // '' | 'uncertain' | 'missing'
+    const [filterCampYear, setFilterCampYear] = useState(''); // '' | '2025' | '2026' etc.
     const [pageSize, setPageSize] = useState(50);
     // Draft filter state (what user is editing before applying)
     const [draft, setDraft] = useState({ searchTerm: '', dateFrom: '', dateTo: '', filterMonth: '', lastDays: '', filterCategory: '', filterCamp: '' });
@@ -439,13 +446,13 @@ export default function Dashboard() {
             // Fetch ALL transactions including deleted — dedup must block re-import of deleted ones
             const freshTransactions = await getAllTransactionsIncludingDeleted();
 
-            // Deduplication logic inside Dashboard
+            // Deduplication logic inside Dashboard (normalized comparison)
             const newTransactions = formattedData.filter(newTx => {
                 return !freshTransactions.some(existingTx =>
                     existingTx.date === newTx.date &&
                     String(existingTx.amount) === String(newTx.amount) &&
-                    existingTx.title === newTx.title &&
-                    existingTx.sender === newTx.sender
+                    normalizeDedupKey(existingTx.title) === normalizeDedupKey(newTx.title) &&
+                    normalizeDedupKey(existingTx.sender) === normalizeDedupKey(newTx.sender)
                 );
             });
 
@@ -493,7 +500,7 @@ export default function Dashboard() {
             // Sort by id to keep the first-inserted one
             const sorted = [...all].sort((a, b) => (a.id < b.id ? -1 : 1));
             for (const tx of sorted) {
-                const key = `${tx.date}|${tx.amount}|${tx.title}|${tx.sender}`;
+                const key = `${tx.date}|${tx.amount}|${normalizeDedupKey(tx.title)}|${normalizeDedupKey(tx.sender)}`;
                 if (seen.has(key)) {
                     idsToDelete.push(tx.id);
                 } else {
@@ -662,6 +669,13 @@ export default function Dashboard() {
 
         if (filterReview === 'uncertain' && !(t.needs_review && t.camp)) return false;
         if (filterReview === 'missing' && !(t.needs_review && !t.camp)) return false;
+
+        // Year filter: match camp year
+        if (filterCampYear && t.camp) {
+            const campObj = camps.find(c => c.name === t.camp);
+            if (campObj && campObj.year && String(campObj.year) !== filterCampYear) return false;
+            if (!campObj || !campObj.year) return false; // no year set → hide when filtering
+        }
 
         return true;
     };
@@ -975,6 +989,15 @@ export default function Dashboard() {
                             <option value="__none__">— Bez wyjazdu —</option>
                             {camps?.map(c => (
                                 <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="filter-field-group">
+                        <span className="filter-field-label">Rok obozu</span>
+                        <select value={filterCampYear} onChange={e => setFilterCampYear(e.target.value)} className="filter-select" style={{ minWidth: 90 }}>
+                            <option value="">Wszystkie</option>
+                            {[...new Set(camps.map(c => c.year).filter(Boolean))].sort().map(y => (
+                                <option key={y} value={String(y)}>{y}</option>
                             ))}
                         </select>
                     </div>
