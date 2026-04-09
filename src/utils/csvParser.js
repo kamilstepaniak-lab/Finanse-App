@@ -181,7 +181,16 @@ export const normalizeTransaction = async (row, camps = []) => {
     if (amount < 0) {
         category = 'Koszt';
     } else {
-        if (!category) category = 'usługa turystyczna';
+        // Default for unrecognized POSITIVE amounts — guard against obvious non-camp transfers
+        if (!category) {
+            const titleLower = title.toLowerCase();
+            const NON_CAMP_KEYWORDS = [
+                'podatek', 'wewne', 'przelew', 'pensja', 'wynagrodzenie',
+                'faktura', 'sklada', 'skladka', 'ubezpiecz', 'zus', 'pit', 'vat'
+            ];
+            const looksLikeInternalTransfer = NON_CAMP_KEYWORDS.some(kw => titleLower.includes(kw));
+            if (!looksLikeInternalTransfer) category = 'usługa turystyczna';
+        }
     }
 
     // Smart Camp Assignment (Wyjazd)
