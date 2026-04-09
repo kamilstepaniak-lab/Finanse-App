@@ -19,7 +19,7 @@ import {
     unsubscribe
 } from '../db';
 import { parseCSV, normalizeTransaction } from '../utils/csvParser';
-import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Bot } from 'lucide-react';
+import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Zap } from 'lucide-react';
 import './Dashboard.css';
 
 export default function Dashboard() {
@@ -1085,7 +1085,7 @@ export default function Dashboard() {
                                     <td style={{ padding: '4px 8px', textAlign: 'center' }}>
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                                             {t.auto_processed && (
-                                                <Bot size={11} title="Algorytm już przetworzył tę transakcję" style={{ color: '#A3AED0', flexShrink: 0 }} />
+                                                <Zap size={11} title="Algorytm już przetworzył tę transakcję" style={{ color: '#7551FF', flexShrink: 0 }} />
                                             )}
                                             {children.length > 0 && (
                                                 <button
