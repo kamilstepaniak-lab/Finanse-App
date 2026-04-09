@@ -139,7 +139,11 @@ export async function buildAgentPromptFromDrive(channel) {
     }
 
     if (parts.length === 0) {
-        throw new Error('Nie udało się pobrać żadnego pliku z Google Drive.');
+        throw new Error(
+            `Nie udało się pobrać żadnych plików z Google Drive. ` +
+            `rootFolderId=${rootFolderId}, agentsFolderId=${agentsFolderId}, ` +
+            `marketingFolderId=${marketingFolderId}, asystentFolderId=${asystentFolderId}`
+        );
     }
 
     // Nagłówek instruujący Claude jak korzystać z tej bazy wiedzy

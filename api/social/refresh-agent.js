@@ -28,6 +28,16 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'channel must be "BS" or "AP"' });
     }
 
+    const rootFolderId = process.env.BS_COWORK_FOLDER_ID;
+    const hasDriveAuth = !!(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_DRIVE_REFRESH_TOKEN);
+
+    if (!rootFolderId) {
+        return res.status(500).json({ error: 'Brak BS_COWORK_FOLDER_ID w env.' });
+    }
+    if (!hasDriveAuth) {
+        return res.status(500).json({ error: 'Brak Google Drive credentials w env.' });
+    }
+
     try {
         const { systemPrompt, driveFiles } = await buildAgentPromptFromDrive(channel);
 
