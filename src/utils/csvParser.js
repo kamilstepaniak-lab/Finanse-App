@@ -337,7 +337,8 @@ export const normalizeTransaction = async (row, camps = []) => {
             // ── Year-awareness: bind transactions to the correct season ──
             // If camp name contains a year (e.g. "Gniewino 2026"), compare with transaction year.
             // This prevents 2026 transactions matching 2027 camps when both exist.
-            const campYear = extractYear(c.name);
+            // c.year is the explicit year field set in Wyjazdy; fallback to year parsed from name.
+            const campYear = c.year || extractYear(c.name);
             const referenceYear = txTitleYear || txYear; // prefer year from title, fallback to tx date
             if (campYear && referenceYear) {
                 const yearDiff = Math.abs(campYear - referenceYear);

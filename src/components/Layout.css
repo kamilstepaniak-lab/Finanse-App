@@ -120,6 +120,51 @@
     color: #ffffff;
 }
 
+/* Collapsible group header */
+.sidebar-group-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #64748B;
+    border-radius: 10px;
+    transition: all 0.15s ease;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    margin-bottom: 2px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.sidebar-group-header:hover {
+    background: #EFF6FF;
+    color: #1570EF;
+}
+
+.sidebar-group-header.active {
+    color: #1570EF;
+    background: #EFF6FF;
+    font-weight: 700;
+}
+
+.sidebar-group-chevron {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.sidebar-group-items {
+    margin-bottom: 4px;
+}
+
+/* Indented nav items inside a group */
+.sidebar-item--indent {
+    padding-left: 28px;
+}
+
 /* Footer */
 .nav-footer {
     margin-top: auto;

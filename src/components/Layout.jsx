@@ -1,14 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, PieChart, Settings, Tent, Search, Download, ReceiptText, RotateCcw, History, Share2 } from 'lucide-react';
+import { LayoutDashboard, PieChart, Settings, Tent, Search, Download, ReceiptText, RotateCcw, History, Share2, ChevronDown, ChevronRight, Wallet } from 'lucide-react';
 import './Layout.css';
 
-const SidebarItem = ({ to, icon: Icon, label }) => {
+const SidebarItem = ({ to, icon: Icon, label, indent }) => {
     return (
         <NavLink
             to={to}
             className={({ isActive }) =>
-                `sidebar-item ${isActive ? 'active' : ''}`
+                `sidebar-item ${isActive ? 'active' : ''} ${indent ? 'sidebar-item--indent' : ''}`
             }
         >
             <Icon size={18} />
@@ -19,6 +19,12 @@ const SidebarItem = ({ to, icon: Icon, label }) => {
 
 export default function Layout() {
     const location = useLocation();
+    const [financeOpen, setFinanceOpen] = useState(true);
+
+    const financeRoutes = ['/', '/reports', '/camps', '/vat-marza', '/zwroty', '/historia'];
+    const isFinanceActive = financeRoutes.some(r =>
+        r === '/' ? location.pathname === '/' : location.pathname.startsWith(r)
+    );
 
     const getPageTitle = () => {
         switch (location.pathname) {
@@ -43,12 +49,31 @@ export default function Layout() {
 
                 <div className="nav-section">
                     <span className="nav-section-label">Nawigacja</span>
-                    <SidebarItem to="/" icon={LayoutDashboard} label="Dashboard" />
-                    <SidebarItem to="/reports" icon={PieChart} label="Raporty" />
-                    <SidebarItem to="/camps" icon={Tent} label="Wyjazdy" />
-                    <SidebarItem to="/vat-marza" icon={ReceiptText} label="VAT Marża" />
-                    <SidebarItem to="/zwroty" icon={RotateCcw} label="Zwroty" />
-                    <SidebarItem to="/historia" icon={History} label="Historia" />
+
+                    {/* Finanse – collapsible group */}
+                    <button
+                        className={`sidebar-group-header ${isFinanceActive ? 'active' : ''}`}
+                        onClick={() => setFinanceOpen(o => !o)}
+                    >
+                        <Wallet size={18} />
+                        <span>Finanse</span>
+                        {financeOpen
+                            ? <ChevronDown size={14} className="sidebar-group-chevron" />
+                            : <ChevronRight size={14} className="sidebar-group-chevron" />
+                        }
+                    </button>
+
+                    {financeOpen && (
+                        <div className="sidebar-group-items">
+                            <SidebarItem to="/" icon={LayoutDashboard} label="Dashboard" indent />
+                            <SidebarItem to="/reports" icon={PieChart} label="Raporty" indent />
+                            <SidebarItem to="/camps" icon={Tent} label="Wyjazdy" indent />
+                            <SidebarItem to="/vat-marza" icon={ReceiptText} label="VAT Marża" indent />
+                            <SidebarItem to="/zwroty" icon={RotateCcw} label="Zwroty" indent />
+                            <SidebarItem to="/historia" icon={History} label="Historia" indent />
+                        </div>
+                    )}
+
                     <SidebarItem to="/social" icon={Share2} label="Social Media" />
                 </div>
 
