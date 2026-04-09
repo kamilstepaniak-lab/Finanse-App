@@ -102,14 +102,19 @@ export const deleteTransaction = async (id) => {
 };
 
 export const deleteTransactions = async (ids) => {
-    const { error } = await supabase
-        .from('transactions')
-        .update({ is_deleted: true })
-        .in('id', ids);
+    // Supabase .in() has URL length limits — batch in chunks of 200
+    const BATCH_SIZE = 200;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+        const batch = ids.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase
+            .from('transactions')
+            .update({ is_deleted: true })
+            .in('id', batch);
 
-    if (error) {
-        console.error('Error deleting transactions:', error);
-        throw error;
+        if (error) {
+            console.error('Error deleting transactions batch:', error);
+            throw error;
+        }
     }
 };
 

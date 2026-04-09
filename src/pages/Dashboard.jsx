@@ -199,13 +199,12 @@ export default function Dashboard() {
             const ids = Array.from(selectedIds);
             const snapshots = transactions.filter(t => selectedIds.has(t.id));
             await deleteTransactions(ids);
-            // Log each deletion with the full pre-delete snapshot
-            await Promise.all(snapshots.map(snap => logActivity({
-                action: 'delete',
-                transactionId: snap.id,
-                snapshot: snap,
-                message: `Usunięto transakcję: ${snap.title || ''} (${snap.amount} ${snap.currency || 'PLN'})`,
-            })));
+            // Log bulk deletion as one entry (avoids 1000+ individual log writes)
+            await logActivity({
+                action: 'bulk_delete',
+                message: `Usunięto ${snapshots.length} transakcji`,
+                details: { count: snapshots.length, ids },
+            });
             setSelectedIds(new Set());
             await loadTransactions();
         }
