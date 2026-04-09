@@ -10,6 +10,7 @@ import {
     deleteTransaction,
     deleteTransactions,
     getAllTransactionsIncludingDeleted,
+    getUnmatchedTransactions,
     clearAllTransactions,
     logActivity,
     subscribeToTransactions,
@@ -229,15 +230,9 @@ export default function Dashboard() {
             let confirmedCount = 0;
             const requiresCamp = (category) => category && category.toLowerCase().includes('usługa turystyczna');
 
-            // Przetwarzaj TYLKO transakcje bez przypisanego obozu:
-            // - potwierdzone (needs_review=false) → pomijaj
-            // - niepewne z obozen (needs_review=true, camp≠'') → pomijaj, admin sprawdzi ręcznie
-            // - bez obozu (camp='') → przetwarzaj
-            const unmatched = transactions.filter(t =>
-                !t.parent_id &&           // pomijaj dzieci podziałów
-                t.needs_review !== false && // pomijaj potwierdzone
-                !t.camp                    // tylko te BEZ obozu (czerwone wiersze)
-            );
+            // Pobierz z bazy TYLKO transakcje bez obozu — nie ładuje całej historii.
+            // Potwierdzone (needs_review=false) i niepewne z obozen są pomijane po stronie DB.
+            const unmatched = await getUnmatchedTransactions();
 
             for (const t of unmatched) {
                 const mockedRow = [t.date, t.amount, t.currency || 'PLN', t.sender, t.title];

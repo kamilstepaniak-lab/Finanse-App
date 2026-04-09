@@ -18,6 +18,25 @@ export const getAllTransactions = async () => {
     return data || [];
 };
 
+// Tylko transakcje bez przypisanego obozu (czerwone wiersze) — używane przez auto-dopasuj.
+// Pobiera z bazy WYŁĄCZNIE to co potrzebne, bez ładowania całej historii.
+export const getUnmatchedTransactions = async () => {
+    const { data, error } = await supabase
+        .from('transactions')
+        .select('id, date, amount, currency, sender, title, category, camp, needs_review, parent_id')
+        .neq('is_deleted', true)
+        .is('parent_id', null)        // tylko rodzice (nie dzieci podziałów)
+        .neq('needs_review', false)   // pomijaj potwierdzone
+        .or('camp.is.null,camp.eq.')  // camp jest NULL lub pusty string
+        .order('date', { ascending: false });
+
+    if (error) {
+        console.error('Error fetching unmatched transactions:', error);
+        return [];
+    }
+    return data || [];
+};
+
 export const getAllTransactionsIncludingDeleted = async () => {
     const { data, error } = await supabase
         .from('transactions')
