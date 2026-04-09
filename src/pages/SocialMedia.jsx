@@ -1,6 +1,6 @@
 // src/pages/SocialMedia.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, CalendarRange } from 'lucide-react';
+import { Plus, CalendarRange, RefreshCw } from 'lucide-react';
 import PostTable from './social/PostTable.jsx';
 import PostEditPanel from './social/PostEditPanel.jsx';
 import PlanMonthModal from './social/PlanMonthModal.jsx';
@@ -21,6 +21,7 @@ export default function SocialMedia() {
     const [loading, setLoading] = useState(true);
     const [toast, setToast] = useState(null);
     const [showPlanMonth, setShowPlanMonth] = useState(false);
+    const [refreshingAgent, setRefreshingAgent] = useState(false);
 
     const showToast = (msg, type = 'error') => {
         setToast({ msg, type });
@@ -44,6 +45,23 @@ export default function SocialMedia() {
     }, [channel]);
 
     useEffect(() => { loadPosts(); }, [loadPosts]);
+
+    const handleRefreshAgent = async () => {
+        setRefreshingAgent(true);
+        try {
+            const res = await fetch('/api/social/refresh-agent', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel }),
+            });
+            if (!res.ok) throw new Error();
+            showToast('Agent odświeżony pomyślnie.', 'success');
+        } catch (e) {
+            showToast('Błąd odświeżania agenta.');
+        } finally {
+            setRefreshingAgent(false);
+        }
+    };
 
     const handleNewPost = async () => {
         try {
@@ -96,6 +114,10 @@ export default function SocialMedia() {
                     <button className="btn-secondary" onClick={() => setShowPlanMonth(true)}>
                         <CalendarRange size={15} />
                         Zaplanuj miesiąc
+                    </button>
+                    <button className="btn-secondary" onClick={handleRefreshAgent} disabled={refreshingAgent}>
+                        <RefreshCw size={15} className={refreshingAgent ? 'spin' : ''} />
+                        {refreshingAgent ? 'Odświeżam...' : 'Odśwież agenta'}
                     </button>
                     <button className="btn-primary" onClick={handleNewPost}>
                         <Plus size={15} />
