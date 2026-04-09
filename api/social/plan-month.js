@@ -52,7 +52,7 @@ Zadbaj o różnorodność typów postów. Nie podawaj dat — użytkownik sam wy
 
     try {
         const message = await anthropic.messages.create({
-            model: 'claude-3-5-sonnet-20241022',
+            model: 'claude-sonnet-4-6',
             max_tokens: 2048,
             messages: [{ role: 'user', content: prompt }],
         });
@@ -79,9 +79,8 @@ Zadbaj o różnorodność typów postów. Nie podawaj dat — użytkownik sam wy
 
         if (error) throw error;
 
-        // Generate text for each draft — import buildGenerationPrompt directly (no HTTP self-call)
-        const generatedPosts = [];
-        for (const draft of data) {
+        // Generate text for all drafts in parallel (non-fatal per post)
+        const generatedPosts = await Promise.all(data.map(async (draft) => {
             try {
                 const { data: examples } = await supabase
                     .from('social_learning_examples')
@@ -100,7 +99,7 @@ Zadbaj o różnorodność typów postów. Nie podawaj dat — użytkownik sam wy
                 });
 
                 const msg = await anthropic.messages.create({
-                    model: 'claude-3-5-sonnet-20241022',
+                    model: 'claude-sonnet-4-6',
                     max_tokens: 1024,
                     messages: [{ role: 'user', content: genPrompt }],
                 });
@@ -112,14 +111,13 @@ Zadbaj o różnorodność typów postów. Nie podawaj dat — użytkownik sam wy
                         ai_content_fb: gen.fb,
                         ai_content_ig: gen.ig,
                     }).eq('id', draft.id);
-                    generatedPosts.push({ ...draft, ai_content_fb: gen.fb, ai_content_ig: gen.ig });
-                } else {
-                    generatedPosts.push(draft);
+                    return { ...draft, ai_content_fb: gen.fb, ai_content_ig: gen.ig };
                 }
+                return draft;
             } catch {
-                generatedPosts.push(draft); // non-fatal: draft created, text generation failed
+                return draft; // non-fatal: draft created, text generation failed
             }
-        }
+        }));
 
         return res.status(200).json({ posts: generatedPosts, count: generatedPosts.length });
     } catch (err) {
