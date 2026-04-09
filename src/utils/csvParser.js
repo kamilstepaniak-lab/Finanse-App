@@ -272,17 +272,25 @@ export const normalizeTransaction = async (row, camps = []) => {
             return dates;
         };
 
+        // Extract year (e.g. 2026) from string — used to bind transactions to the correct season
+        const extractYear = (str) => {
+            const m = str.match(/\b(20\d{2})\b/);
+            return m ? parseInt(m[1]) : null;
+        };
+
         const tNorm = norm(textToSearch);
         const tNormNoSpaces = tNorm.replace(/\s+/g, '');
         const tTokens = extractTokens(textToSearch);
         const tDates = extractDates(textToSearch);
+        const txYear = transactionDate ? new Date(transactionDate).getFullYear() : null;
+        const txTitleYear = extractYear(textToSearch); // year mentioned in the transfer title
 
         let bestMatch = '';
         let highestScore = 0;
+        let secondBestScore = 0;
         let bestHasAnyMatch = false;
-        let isTie = false;
-        let tieCandidates = [];
-        let campsWithAnyMatch = 0; // count camps that have at least 1 token match
+        let tieCandidates = [];       // camps within ~5% of best score for date tie-breaking
+        let campsWithSignificantMatch = 0; // camps where >=50% of their tokens match
 
         for (const c of campsList) {
             const cTokens = extractTokens(c.name);
@@ -324,30 +332,58 @@ export const normalizeTransaction = async (row, camps = []) => {
             const totalItems = cTokens.length + cDates.size;
             const campCoverage = totalItems > 0 ? (matchingTokens + dateBonus + tagBonus) / totalItems : 0;
             const txCoverage = tTokens.length > 0 ? Math.max(matchingTokens / tTokens.length, 0.15) : 1;
-            const score = campCoverage * txCoverage;
+            let score = campCoverage * txCoverage;
+
+            // ── Year-awareness: bind transactions to the correct season ──
+            // If camp name contains a year (e.g. "Gniewino 2026"), compare with transaction year.
+            // This prevents 2026 transactions matching 2027 camps when both exist.
+            const campYear = extractYear(c.name);
+            const referenceYear = txTitleYear || txYear; // prefer year from title, fallback to tx date
+            if (campYear && referenceYear) {
+                const yearDiff = Math.abs(campYear - referenceYear);
+                if (yearDiff === 0) {
+                    score *= 1.1;   // slight bonus — correct year
+                } else if (yearDiff === 1) {
+                    score *= 0.25;  // heavy penalty — adjacent year (could be advance/late payment)
+                } else {
+                    score *= 0.05;  // near-eliminate — 2+ years apart
+                }
+            }
+
             const hasAnyMatch = matchingTokens > 0 || dateBonus > 0 || tagBonus > 0;
 
-            if (matchingTokens >= 1) campsWithAnyMatch++;
+            // Count "significant" matches (>=50% of camp tokens) for multi-camp detection
+            const matchRatio = cTokens.length > 0 ? matchingTokens / cTokens.length : 0;
+            if (matchRatio >= 0.5) campsWithSignificantMatch++;
 
+            // Track best, second-best, and near-ties
             if (score > highestScore) {
+                secondBestScore = highestScore;
                 highestScore = score;
                 bestMatch = c.name;
                 bestHasAnyMatch = hasAnyMatch;
-                isTie = false;
                 tieCandidates = [{ name: c.name, cDates }];
-            } else if (Math.abs(score - highestScore) < 0.001 && score > 0) {
-                isTie = true;
-                tieCandidates.push({ name: c.name, cDates });
+            } else if (score > secondBestScore) {
+                secondBestScore = score;
+                // Also track as tie candidate if within 10% of best
+                if (highestScore > 0 && (highestScore - score) / highestScore < 0.1) {
+                    tieCandidates.push({ name: c.name, cDates });
+                }
             }
         }
 
-        // Multi-camp transaction: 3+ camps have token matches -> flag for manual split/review
-        if (campsWithAnyMatch >= 3) return { camp: bestMatch || '', needsReview: true };
+        // ── Decision logic based on confidence gap ──
+
+        // Multi-camp: 3+ camps have significant (>=50%) token matches → manual split needed
+        if (campsWithSignificantMatch >= 3) return { camp: bestMatch || '', needsReview: true };
 
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
-        // Tie-breaker: use transaction date proximity to pick best camp
-        if (isTie && transactionDate && tieCandidates.length > 1) {
+        const scoreGap = highestScore - secondBestScore;
+        const relativeGap = highestScore > 0 ? scoreGap / highestScore : 1;
+
+        // Near-tie: scores within 10% — try date proximity to pick winner
+        if (relativeGap < 0.1 && tieCandidates.length > 1 && transactionDate) {
             const tDate = new Date(transactionDate);
             let closestName = null;
             let closestDiff = Infinity;
@@ -367,13 +403,19 @@ export const normalizeTransaction = async (row, camps = []) => {
             if (closestName && closestDiff <= 90) {
                 return { camp: closestName, needsReview: false };
             }
+            // Date tie-break failed → review
+            return { camp: bestMatch, needsReview: true };
         }
 
-        // Certain match: no tie AND at least one keyword hit
-        const isCertain = !isTie && bestHasAnyMatch;
+        // Confident match: clear winner with meaningful gap over runner-up
+        const isConfident = bestHasAnyMatch && highestScore >= 0.1 && (
+            secondBestScore === 0 ||    // only one camp matched at all
+            relativeGap >= 0.25         // winner is >=25% better than runner-up
+        );
 
-        if (isCertain) return { camp: bestMatch, needsReview: false };
-        if (highestScore >= 0.3) return { camp: bestMatch, needsReview: true };
+        if (isConfident) return { camp: bestMatch, needsReview: false };
+
+        // Weak/ambiguous match — assign best guess but flag for review
         if (bestMatch && highestScore > 0) return { camp: bestMatch, needsReview: true };
         return { camp: '', needsReview: true };
     };
