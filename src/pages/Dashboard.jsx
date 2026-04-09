@@ -221,41 +221,50 @@ export default function Dashboard() {
     };
 
     const autoAssignCampsToExisting = async () => {
-        if (!window.confirm("Ta operacja spróbuje automatycznie dobrać wyjazd do każdej transakcji, która jeszcze go nie ma. Kontynuować?")) return;
+        if (!window.confirm("Ta operacja spróbuje automatycznie dobrać wyjazd do transakcji BEZ przypisanego obozu. Transakcje z już przypisanym obozem (nawet niepewne) nie będą zmieniane. Kontynuować?")) return;
 
         setLoading(true);
         try {
             let updatedCount = 0;
+            let confirmedCount = 0;
             const requiresCamp = (category) => category && category.toLowerCase().includes('usługa turystyczna');
 
-            const unassigned = transactions.filter(t =>
+            // Przetwarzaj TYLKO transakcje bez przypisanego obozu:
+            // - potwierdzone (needs_review=false) → pomijaj
+            // - niepewne z obozen (needs_review=true, camp≠'') → pomijaj, admin sprawdzi ręcznie
+            // - bez obozu (camp='') → przetwarzaj
+            const unmatched = transactions.filter(t =>
                 !t.parent_id &&           // pomijaj dzieci podziałów
-                t.needs_review !== false  // pomijaj potwierdzone (needs_review=false)
+                t.needs_review !== false && // pomijaj potwierdzone
+                !t.camp                    // tylko te BEZ obozu (czerwone wiersze)
             );
 
-            for (const t of unassigned) {
+            for (const t of unmatched) {
                 const mockedRow = [t.date, t.amount, t.currency || 'PLN', t.sender, t.title];
                 const normalizedResult = await normalizeTransaction(mockedRow, camps);
 
-                const updates = { needs_review: false };
-
-                // Only assign camp if category requires it — prefer existing DB category over auto-assign suggestion
+                // Transakcje nie wymagające obozu (kategoria inna niż usługa turystyczna)
                 if (!requiresCamp(t.category || normalizedResult.category)) {
-                    await updateTransaction(t.id, updates);
+                    await updateTransaction(t.id, { needs_review: false });
+                    confirmedCount++;
                     continue;
                 }
 
                 if (normalizedResult.camp) {
-                    updates.camp = normalizedResult.camp;
-                    updates.needs_review = normalizedResult.needsReview;
+                    await updateTransaction(t.id, {
+                        camp: normalizedResult.camp,
+                        needs_review: normalizedResult.needsReview,
+                    });
                     updatedCount++;
-                } else {
-                    updates.needs_review = true;
                 }
-
-                await updateTransaction(t.id, updates);
+                // Jeśli nadal brak dopasowania — zostawiamy needs_review=true i camp='' (bez zmiany)
             }
-            alert(`Udało się dopasować wyjazd do ${updatedCount} transakcji!`);
+
+            const msgs = [];
+            if (updatedCount > 0) msgs.push(`Dopasowano obóz do ${updatedCount} transakcji`);
+            if (confirmedCount > 0) msgs.push(`Potwierdzono kategorię dla ${confirmedCount} transakcji`);
+            if (msgs.length === 0) msgs.push('Brak nowych transakcji do dopasowania');
+            alert(msgs.join('\n'));
         } catch (e) {
             console.error(e);
             alert("Błąd automatycznego dopasowania: " + e.message);
