@@ -464,21 +464,42 @@ export default function Dashboard() {
                 source_file: t.sourceFile
             }));
 
-            await addTransactions(formattedData);
+            // Dedup: skip rows already in DB where ALL 4 fields are identical
+            const existingTransactions = await getAllTransactionsIncludingDeleted();
+            const toImport = formattedData.filter(newTx =>
+                !existingTransactions.some(ex =>
+                    ex.date === newTx.date &&
+                    String(ex.amount) === String(newTx.amount) &&
+                    normalizeDedupKey(ex.title) === normalizeDedupKey(newTx.title) &&
+                    normalizeDedupKey(ex.sender) === normalizeDedupKey(newTx.sender)
+                )
+            );
+
+            if (toImport.length === 0) {
+                alert('Wszystkie transakcje z tego pliku już istnieją w systemie!');
+                return;
+            }
+
+            await addTransactions(toImport);
 
             await logActivity({
                 action: 'csv_import',
                 message: `Zaimportowano plik: ${file.name}`,
                 details: {
                     file_name: file.name,
-                    imported_count: formattedData.length,
+                    imported_count: toImport.length,
                     total_rows_in_file: formattedData.length,
+                    skipped_duplicates: formattedData.length - toImport.length,
                 },
             });
 
             await loadTransactions();
 
-            alert(`Zaimportowano ${formattedData.length} transakcji!`);
+            if (toImport.length < formattedData.length) {
+                alert(`Zaimportowano ${toImport.length} transakcji. Pominięto ${formattedData.length - toImport.length} duplikatów (identyczna data, kwota, tytuł i nadawca).`);
+            } else {
+                alert(`Zaimportowano ${toImport.length} transakcji!`);
+            }
         } catch (err) {
             console.error(err);
             alert('Błąd importu: ' + err.message);
