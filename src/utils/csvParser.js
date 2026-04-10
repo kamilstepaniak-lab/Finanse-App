@@ -325,9 +325,8 @@ export const normalizeTransaction = async (row, camps = []) => {
         let bestMatch = '';
         let highestScore = 0;
         let secondBestScore = 0;
+        let bestHasAnyMatch = false;
         let campsWithAnyMatch = 0;
-        let campsAboveThreshold = 0;
-        let bestMeetsThreshold = false;
         // Track matched title tokens per camp to detect multi-camp payments
         let bestMatchedTokens = new Set();
         let secondMatchedTokens = new Set();
@@ -338,42 +337,69 @@ export const normalizeTransaction = async (row, camps = []) => {
 
             // Build word bank: name tokens + individual tag words (normalized)
             const campTagWords = (c.tags || []).map(t => norm(t)).filter(t => t.length >= 2);
-            const wordBank = new Set([...cTokens, ...campTagWords]);
+            const allCampTokens = [...new Set([...cTokens, ...campTagWords])];
 
-            if (wordBank.size === 0) continue;
+            if (allCampTokens.length === 0) continue;
 
-            // Count transaction title tokens found in this camp's word bank
-            // Also track WHICH tokens matched (for multi-camp detection)
-            let wordMatchCount = 0;
+            // Score title tokens against word bank — track which tx tokens matched
+            let titleMatching = 0;
             const matchedTxTokens = new Set();
             for (const txToken of titleTokens) {
-                if (wordBank.has(txToken)) {
-                    wordMatchCount += 1;
+                if (allCampTokens.includes(txToken)) {
+                    titleMatching += 1;
                     matchedTxTokens.add(txToken);
-                } else if ([...wordBank].some(w => fuzzyTokenMatch(w, [txToken]))) {
-                    wordMatchCount += 0.8;
-                    matchedTxTokens.add(txToken);
-                } else if ([...wordBank].some(w => w.length >= 4 && titleNormNoSpaces.includes(w))) {
-                    wordMatchCount += 0.7;
+                } else if (allCampTokens.some(w => fuzzyTokenMatch(w, [txToken]))) {
+                    titleMatching += 0.8;
                     matchedTxTokens.add(txToken);
                 }
             }
-
-            // Date match: each camp date found in transaction counts toward the threshold
-            let dateMatchCount = 0;
-            for (const d of cDates) {
-                if (tDates.has(d)) dateMatchCount += 1;
+            // No-spaces pass: camp-token-centric (e.g. "JASTAR NIA" or "CampBorek")
+            // Check if each camp token appears in the title WITHOUT spaces
+            for (const campToken of allCampTokens) {
+                if (campToken.length >= 4 && titleNormNoSpaces.includes(campToken)) {
+                    // Only count if not already matched via exact/fuzzy
+                    if (!titleTokens.includes(campToken) && !titleTokens.some(t => fuzzyTokenMatch(campToken, [t]))) {
+                        titleMatching += 0.7;
+                        matchedTxTokens.add(campToken);
+                    }
+                }
             }
 
-            // Effective match = word matches + date matches
-            const effectiveMatch = wordMatchCount + dateMatchCount;
+            // Combined (title + sender) — same approach
+            let combinedMatching = 0;
+            for (const txToken of allTokens) {
+                if (allCampTokens.includes(txToken)) {
+                    combinedMatching += 1;
+                } else if (allCampTokens.some(w => fuzzyTokenMatch(w, [txToken]))) {
+                    combinedMatching += 0.8;
+                }
+            }
+            for (const campToken of allCampTokens) {
+                if (campToken.length >= 4 && combinedNormNoSpaces.includes(campToken)) {
+                    if (!allTokens.includes(campToken) && !allTokens.some(t => fuzzyTokenMatch(campToken, [t]))) {
+                        combinedMatching += 0.7;
+                    }
+                }
+            }
 
-            // Threshold: min(3, name token count)
-            const campThreshold = Math.min(3, cTokens.length);
-            const meetsThreshold = effectiveMatch >= campThreshold;
+            // Date bonus
+            let dateBonus = 0;
+            for (const d of cDates) {
+                if (tDates.has(d)) dateBonus += 1;
+            }
 
-            // Score for ranking
-            let score = wordBank.size > 0 ? effectiveMatch / wordBank.size : 0;
+            const totalItems = cTokens.length + cDates.size;
+
+            // Coverage scores: how much of the camp is explained by the transaction
+            const titleCampCoverage = totalItems > 0 ? (titleMatching + dateBonus) / totalItems : 0;
+            const titleTxCoverage = titleTokens.length > 0 ? Math.max(titleMatching / titleTokens.length, 0.2) : 1;
+            const titleScore = titleCampCoverage * titleTxCoverage;
+
+            const combinedCampCoverage = totalItems > 0 ? (combinedMatching + dateBonus) / totalItems : 0;
+            const combinedTxCoverage = allTokens.length > 0 ? Math.max(combinedMatching / allTokens.length, 0.15) : 1;
+            const combinedScore = combinedCampCoverage * combinedTxCoverage;
+
+            let score = Math.max(titleScore, combinedScore * 0.7);
 
             // Year-awareness multiplier
             const campYear = c.year || extractYear(c.name);
@@ -393,16 +419,16 @@ export const normalizeTransaction = async (row, camps = []) => {
                 }
             }
 
-            const hasAnyMatch = effectiveMatch > 0;
-            if (hasAnyMatch) campsWithAnyMatch++;
-            if (meetsThreshold) campsAboveThreshold++;
+            const hasAnyMatch = titleMatching > 0 || combinedMatching > 0 || dateBonus > 0;
+            // Only count as real competitor if score is meaningful
+            if (hasAnyMatch && score >= 0.1) campsWithAnyMatch++;
 
             if (score > highestScore) {
                 secondBestScore = highestScore;
                 secondMatchedTokens = bestMatchedTokens;
                 highestScore = score;
                 bestMatch = c.name;
-                bestMeetsThreshold = meetsThreshold;
+                bestHasAnyMatch = hasAnyMatch;
                 bestMatchedTokens = matchedTxTokens;
             } else if (score > secondBestScore) {
                 secondBestScore = score;
@@ -423,26 +449,24 @@ export const normalizeTransaction = async (row, camps = []) => {
             return { camp: '', needsReview: true };
         }
         //    b) Two camps match on completely different tokens (e.g. "Tymek Gniewino Mazury")
-        //       → no token overlap between best and second match → two camps in one transfer
         if (campsWithAnyMatch >= 2 && bestMatchedTokens.size > 0 && secondMatchedTokens.size > 0) {
             const overlap = [...bestMatchedTokens].some(t => secondMatchedTokens.has(t));
             if (!overlap) return { camp: '', needsReview: true };
         }
 
-        // 3. Only one camp matched anything → no competition → auto-approve
+        // 3. Only one camp scored → auto-approve
         if (campsWithAnyMatch === 1) return { camp: bestMatch, needsReview: false };
 
-        // 4. Exactly one camp meets the word+date threshold → confident winner
-        if (campsAboveThreshold === 1 && bestMeetsThreshold) {
-            return { camp: bestMatch, needsReview: false };
-        }
+        // 4. Clear winner by score gap
+        const relativeGap = highestScore > 0 ? (highestScore - secondBestScore) / highestScore : 1;
+        const requiredGap = campsWithAnyMatch >= 3 ? 0.50 : (campsWithAnyMatch >= 2 ? 0.35 : 0.25);
+        const isConfident = bestHasAnyMatch && highestScore >= 0.08 && (
+            secondBestScore === 0 || relativeGap >= requiredGap
+        );
 
-        // 5. Multiple camps meet threshold → ambiguous, suggest best but flag for review
-        if (campsAboveThreshold > 1) {
-            return { camp: bestMatch, needsReview: true };
-        }
+        if (isConfident) return { camp: bestMatch, needsReview: false };
 
-        // 6. No camp meets threshold → weak match, suggest best and flag for review
+        // 5. Ambiguous — suggest best but flag for review
         return { camp: bestMatch, needsReview: true };
     };
 
