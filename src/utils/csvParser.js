@@ -421,7 +421,7 @@ export const normalizeTransaction = async (row, camps = []) => {
 
             const hasAnyMatch = titleMatching > 0 || combinedMatching > 0 || dateBonus > 0;
             // Only count as real competitor if score is meaningful
-            if (hasAnyMatch && score >= 0.1) campsWithAnyMatch++;
+            if (hasAnyMatch && score >= 0.05) campsWithAnyMatch++;
 
             if (score > highestScore) {
                 secondBestScore = highestScore;
@@ -444,7 +444,7 @@ export const normalizeTransaction = async (row, camps = []) => {
         // 2. Multi-camp payment detection
         //    a) List keywords ("oraz", "i", "&", "+") with 2+ matched camps
         const titleLower = norm(searchTitle || '');
-        const hasListKeyword = /\boraz\b|\bi\b|[&+]/.test(titleLower);
+        const hasListKeyword = /\boraz\b|[&+]/.test(titleLower);
         if (hasListKeyword && campsWithAnyMatch >= 2) {
             return { camp: '', needsReview: true };
         }
