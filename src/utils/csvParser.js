@@ -328,6 +328,9 @@ export const normalizeTransaction = async (row, camps = []) => {
         let campsWithAnyMatch = 0;
         let campsAboveThreshold = 0;
         let bestMeetsThreshold = false;
+        // Track matched title tokens per camp to detect multi-camp payments
+        let bestMatchedTokens = new Set();
+        let secondMatchedTokens = new Set();
 
         for (const c of campsList) {
             const cTokens = extractTokens(c.name);
@@ -340,14 +343,19 @@ export const normalizeTransaction = async (row, camps = []) => {
             if (wordBank.size === 0) continue;
 
             // Count transaction title tokens found in this camp's word bank
+            // Also track WHICH tokens matched (for multi-camp detection)
             let wordMatchCount = 0;
+            const matchedTxTokens = new Set();
             for (const txToken of titleTokens) {
                 if (wordBank.has(txToken)) {
                     wordMatchCount += 1;
+                    matchedTxTokens.add(txToken);
                 } else if ([...wordBank].some(w => fuzzyTokenMatch(w, [txToken]))) {
-                    wordMatchCount += 0.8;  // fuzzy prefix (Polish grammar variants)
+                    wordMatchCount += 0.8;
+                    matchedTxTokens.add(txToken);
                 } else if ([...wordBank].some(w => w.length >= 4 && titleNormNoSpaces.includes(w))) {
-                    wordMatchCount += 0.7;  // no-spaces (split words like "JASTAR NIA")
+                    wordMatchCount += 0.7;
+                    matchedTxTokens.add(txToken);
                 }
             }
 
@@ -357,14 +365,14 @@ export const normalizeTransaction = async (row, camps = []) => {
                 if (tDates.has(d)) dateMatchCount += 1;
             }
 
-            // Effective match = word matches + date matches (dates help distinguish same-location camps)
+            // Effective match = word matches + date matches
             const effectiveMatch = wordMatchCount + dateMatchCount;
 
-            // Threshold: min(3, name token count) — small camps (1-2 tokens) auto-adjust
+            // Threshold: min(3, name token count)
             const campThreshold = Math.min(3, cTokens.length);
             const meetsThreshold = effectiveMatch >= campThreshold;
 
-            // Score for ranking when multiple camps qualify
+            // Score for ranking
             let score = wordBank.size > 0 ? effectiveMatch / wordBank.size : 0;
 
             // Year-awareness multiplier
@@ -376,12 +384,12 @@ export const normalizeTransaction = async (row, camps = []) => {
                     score *= 1.1;
                 } else if (yearDiff === 1) {
                     if (campYear === referenceYear + 1 && txMonth >= 10 && c.season === 'zima') {
-                        score *= 0.9;   // advance winter payment — minor penalty
+                        score *= 0.9;
                     } else {
-                        score *= 0.25;  // adjacent year — heavy penalty
+                        score *= 0.25;
                     }
                 } else {
-                    score *= 0.05;  // 2+ years apart — near-eliminate
+                    score *= 0.05;
                 }
             }
 
@@ -391,11 +399,14 @@ export const normalizeTransaction = async (row, camps = []) => {
 
             if (score > highestScore) {
                 secondBestScore = highestScore;
+                secondMatchedTokens = bestMatchedTokens;
                 highestScore = score;
                 bestMatch = c.name;
                 bestMeetsThreshold = meetsThreshold;
+                bestMatchedTokens = matchedTxTokens;
             } else if (score > secondBestScore) {
                 secondBestScore = score;
+                secondMatchedTokens = matchedTxTokens;
             }
         }
 
@@ -404,12 +415,18 @@ export const normalizeTransaction = async (row, camps = []) => {
         // 1. No match at all
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
-        // 2. Multi-camp payment detection: title contains list keywords ("oraz", "i", "&", "+")
-        //    AND 2+ different camps matched → parent is paying for multiple camps at once
+        // 2. Multi-camp payment detection
+        //    a) List keywords ("oraz", "i", "&", "+") with 2+ matched camps
         const titleLower = norm(searchTitle || '');
         const hasListKeyword = /\boraz\b|\bi\b|[&+]/.test(titleLower);
         if (hasListKeyword && campsWithAnyMatch >= 2) {
             return { camp: '', needsReview: true };
+        }
+        //    b) Two camps match on completely different tokens (e.g. "Tymek Gniewino Mazury")
+        //       → no token overlap between best and second match → two camps in one transfer
+        if (campsWithAnyMatch >= 2 && bestMatchedTokens.size > 0 && secondMatchedTokens.size > 0) {
+            const overlap = [...bestMatchedTokens].some(t => secondMatchedTokens.has(t));
+            if (!overlap) return { camp: '', needsReview: true };
         }
 
         // 3. Only one camp matched anything → no competition → auto-approve
