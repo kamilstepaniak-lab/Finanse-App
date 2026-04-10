@@ -464,44 +464,21 @@ export default function Dashboard() {
                 source_file: t.sourceFile
             }));
 
-            // Fetch ALL transactions including deleted — dedup must block re-import of deleted ones
-            const freshTransactions = await getAllTransactionsIncludingDeleted();
-
-            // Deduplication logic inside Dashboard (normalized comparison)
-            const newTransactions = formattedData.filter(newTx => {
-                return !freshTransactions.some(existingTx =>
-                    existingTx.date === newTx.date &&
-                    String(existingTx.amount) === String(newTx.amount) &&
-                    normalizeDedupKey(existingTx.title) === normalizeDedupKey(newTx.title) &&
-                    normalizeDedupKey(existingTx.sender) === normalizeDedupKey(newTx.sender)
-                );
-            });
-
-            if (newTransactions.length === 0) {
-                alert('Wszystkie transakcje z tego pliku już istnieją w systemie!');
-                return;
-            }
-
-            await addTransactions(newTransactions);
+            await addTransactions(formattedData);
 
             await logActivity({
                 action: 'csv_import',
                 message: `Zaimportowano plik: ${file.name}`,
                 details: {
                     file_name: file.name,
-                    imported_count: newTransactions.length,
+                    imported_count: formattedData.length,
                     total_rows_in_file: formattedData.length,
-                    skipped_duplicates: formattedData.length - newTransactions.length,
                 },
             });
 
             await loadTransactions();
 
-            if (newTransactions.length < formattedData.length) {
-                alert(`Zaimportowano ${newTransactions.length} nowych transakcji. Pominięto ${formattedData.length - newTransactions.length} duplikatów!`);
-            } else {
-                alert(`Zaimportowano ${newTransactions.length} transakcji!`);
-            }
+            alert(`Zaimportowano ${formattedData.length} transakcji!`);
         } catch (err) {
             console.error(err);
             alert('Błąd importu: ' + err.message);
