@@ -166,7 +166,10 @@ export const normalizeTransaction = async (row, camps = []) => {
             lower.includes('hali')
         ) return 'Szkolenie';
 
-        // 5. Other specific categories
+        // 5. Pensja / wynagrodzenie kadry
+        if (lower.includes('pensja') || lower.includes('wynagrodzenie') || lower.includes('wyplata')) return 'Pensja';
+
+        // 6. Other specific categories
         if (lower.includes('czepek')) return 'zakup czepek';
         if (lower.includes('wpisowe')) return 'wpisowe';
         if (lower.includes('faktura')) return 'FAKTURA VAT';
@@ -178,14 +181,14 @@ export const normalizeTransaction = async (row, camps = []) => {
     let category = autoCategorize(title);
     if (!category) category = autoCategorize(sender);
 
-    if (amount < 0) {
+    if (amount < 0 && !category) {
         category = 'Koszt';
     } else {
         // Default for unrecognized POSITIVE amounts — guard against obvious non-camp transfers
         if (!category) {
             const titleLower = title.toLowerCase();
             const NON_CAMP_KEYWORDS = [
-                'podatek', 'wewne', 'przelew', 'pensja', 'wynagrodzenie',
+                'podatek', 'wewne', 'przelew',
                 'faktura', 'sklada', 'skladka', 'ubezpiecz', 'zus', 'pit', 'vat'
             ];
             const looksLikeInternalTransfer = NON_CAMP_KEYWORDS.some(kw => titleLower.includes(kw));
