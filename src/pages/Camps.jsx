@@ -181,31 +181,48 @@ export default function Camps() {
 
     const handleRegenerateTags = async (camp) => {
         const autoTags = extractTagsFromName(camp.name);
-        const merged = [...new Set([...autoTags, ...(camp.tags || [])])];
+        // Keep only manual tags (those not generated from any camp name — i.e. short aliases added by user)
+        // Heuristic: manual tags are those that are NOT individual normalized words from this name
+        const manualTags = (camp.tags || []).filter(t => !autoTags.includes(t) && !t.match(/^[a-z]{10,}$/));
+        const merged = [...new Set([...autoTags, ...manualTags])];
         setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, tags: merged } : c));
         await updateCamp(camp.id, { tags: merged });
     };
 
+    const handleRegenerateAllTags = async () => {
+        if (!window.confirm('Przelicz tagi dla wszystkich obozów? Stare tagi (concatenated) zostaną zastąpione indywidualnymi słowami.')) return;
+        let updated = 0;
+        for (const camp of (camps || [])) {
+            const autoTags = extractTagsFromName(camp.name);
+            // Keep manual tags: short aliases (not matching auto-generated words)
+            const manualTags = (camp.tags || []).filter(t => !autoTags.includes(t) && !t.match(/^[a-z]{10,}$/));
+            const merged = [...new Set([...autoTags, ...manualTags])];
+            // Skip if already correct
+            if (JSON.stringify(merged.sort()) === JSON.stringify((camp.tags || []).slice().sort())) continue;
+            setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, tags: merged } : c));
+            await updateCamp(camp.id, { tags: merged });
+            updated++;
+        }
+        alert(`Zaktualizowano tagi dla ${updated} obozów.`);
+    };
+
     const handleAutoFillYears = async () => {
-        const campsWithoutYear = (camps || []).filter(c => !c.year);
-        if (campsWithoutYear.length === 0) {
-            alert('Wszystkie obozy mają już przypisany rok!');
+        const allCamps = camps || [];
+        if (allCamps.length === 0) {
+            alert('Brak obozów do zaktualizowania.');
             return;
         }
         let updated = 0;
-        for (const camp of campsWithoutYear) {
-            // Try to extract year from name first
+        for (const camp of allCamps) {
+            // Try to extract year from name first, otherwise default to 2026
             const yearMatch = camp.name.match(/\b(20\d{2})\b/);
-            let year = yearMatch ? parseInt(yearMatch[1]) : null;
-            // If no year in name, assign based on season
-            if (!year && camp.season === 'zima') year = 2025;
-            if (!year && camp.season === 'lato') year = 2026;
-            if (!year) year = currentYear; // fallback
+            const year = yearMatch ? parseInt(yearMatch[1]) : 2026;
+            if (camp.year === year) continue;
             setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, year } : c));
             await updateCamp(camp.id, { year });
             updated++;
         }
-        alert(`Uzupełniono rok dla ${updated} obozów.`);
+        alert(`Zaktualizowano rok dla ${updated} obozów.`);
     };
 
     const handleSeasonChange = async (camp, newSeason) => {
@@ -280,11 +297,11 @@ export default function Camps() {
                 <h3>Zarządzanie Wyjazdami</h3>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <button
-                        onClick={handleAutoFillYears}
-                        title="Uzupełnij brakujące lata: zima→2025, lato→2026 (lub z nazwy obozu)"
+                        onClick={handleRegenerateAllTags}
+                        title="Przelicz tagi dla wszystkich obozów — zastąp stare concatenated tagi indywidualnymi słowami"
                         style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #e0e5f2', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#2b3674', fontWeight: 600 }}
                     >
-                        Uzupełnij lata
+                        Przelicz tagi
                     </button>
                     <button
                         onClick={() => setSortOrder(sortOrder === 'asc' ? 'none' : 'asc')}
