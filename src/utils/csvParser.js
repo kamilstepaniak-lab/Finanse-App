@@ -322,25 +322,34 @@ export const normalizeTransaction = async (row, camps = []) => {
         const txTitleYear = extractYear(searchTitle || ''); // year mentioned in the transfer title
         const txMonth = transactionDate ? new Date(transactionDate).getMonth() + 1 : null;
 
-        // ── Pre-pass: unique token detection ──
-        // Build a map: token → which camps contain it.
-        // If a title token appears in ONLY ONE camp, that uniquely identifies the camp
-        // and we can auto-assign without going through full scoring.
-        // If title tokens uniquely identify TWO DIFFERENT camps → multi-camp payment.
-        const tokenCampIndex = new Map(); // token → [campName, ...]
+        // ── Pre-pass: unique token detection (year-aware) ──
+        // Build a map: token → camp objects that contain it.
+        // If a title token narrows to ONLY ONE camp (after year filtering), auto-assign.
+        // If title tokens point to TWO DIFFERENT camps → multi-camp payment.
+        const referenceYear = (txTitleYear || txYear);
+        const tokenCampIndex = new Map(); // token → [camp, ...]
         for (const c of campsList) {
             const cToks = extractTokens(c.name);
             const tagWords = (c.tags || []).map(t => norm(t)).filter(t => t.length >= 2);
             for (const tok of new Set([...cToks, ...tagWords])) {
                 if (!tokenCampIndex.has(tok)) tokenCampIndex.set(tok, []);
-                tokenCampIndex.get(tok).push(c.name);
+                tokenCampIndex.get(tok).push(c);
             }
         }
         const uniquelyIdentified = new Set(); // camp names uniquely pointed to by a title token
         for (const txToken of titleTokens) {
             if (txToken.length >= 4) {
-                const matches = tokenCampIndex.get(txToken);
-                if (matches && matches.length === 1) uniquelyIdentified.add(matches[0]);
+                let candidates = tokenCampIndex.get(txToken);
+                if (!candidates || candidates.length === 0) continue;
+                // Filter to year-matching camps when year is known
+                if (referenceYear && candidates.length > 1) {
+                    const yearFiltered = candidates.filter(c => {
+                        const cy = c.year || extractYear(c.name);
+                        return !cy || cy === referenceYear;
+                    });
+                    if (yearFiltered.length > 0) candidates = yearFiltered;
+                }
+                if (candidates.length === 1) uniquelyIdentified.add(candidates[0].name);
             }
         }
         if (uniquelyIdentified.size === 1) {
