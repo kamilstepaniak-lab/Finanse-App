@@ -667,6 +667,7 @@ export default function Dashboard() {
 
         if (filterReview === 'uncertain' && !(t.needs_review && t.camp)) return false;
         if (filterReview === 'missing' && !(t.needs_review && !t.camp)) return false;
+        if (filterReview === 'no_category' && !(!t.category || t.category === '')) return false;
 
         // Year filter: match camp year
         if (filterCampYear && t.camp) {
@@ -785,8 +786,9 @@ export default function Dashboard() {
     const kpiCount   = kpiItems.length;
     const kpiZwrot   = kpiItems.filter(t => t.category === 'Zwrot' && t.amount > 0).reduce((s, t) => s + t.amount, 0);
     // Review counters operate only on leaf parents (split parents never carry needs_review)
-    const kpiReview  = kpiParents.filter(t => t.needs_review && t.camp).length;
-    const kpiMissing = kpiParents.filter(t => t.needs_review && !t.camp).length;
+    const kpiReview      = kpiParents.filter(t => t.needs_review && t.camp).length;
+    const kpiMissing     = kpiParents.filter(t => t.needs_review && !t.camp).length;
+    const kpiNoCategory  = kpiParents.filter(t => !t.category || t.category === '').length;
     // New KPIs
     const kpiNetProfit = kpiIncome - kpiExpense - kpiZwrot;
     const kpiEurIncome = kpiItems.filter(t => t.currency === 'EUR' && t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
@@ -904,6 +906,17 @@ export default function Dashboard() {
                         <span className="review-dot" style={{ background: '#EE5D50' }} />
                         Bez obozu ({kpiMissing})
                     </button>
+                    {kpiNoCategory > 0 && (
+                        <button
+                            className={`review-btn ${filterReview === 'no_category' ? 'active' : ''}`}
+                            onClick={() => setFilterReview(v => v === 'no_category' ? '' : 'no_category')}
+                            title="Pokaż transakcje bez przypisanej kategorii"
+                            style={{ borderColor: '#7C3AED', color: filterReview === 'no_category' ? '#fff' : '#5B21B6', background: filterReview === 'no_category' ? '#7C3AED' : 'transparent' }}
+                        >
+                            <span className="review-dot" style={{ background: '#7C3AED' }} />
+                            Nie dopasowane ({kpiNoCategory})
+                        </button>
+                    )}
                     <div className="filter-spacer" />
                     <div className="filter-field-group">
                         <span className="filter-field-label">Sortuj</span>
