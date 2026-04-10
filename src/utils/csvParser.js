@@ -444,7 +444,7 @@ export const normalizeTransaction = async (row, camps = []) => {
         // 2. Multi-camp payment detection
         //    a) List keywords ("oraz", "i", "&", "+") with 2+ matched camps
         const titleLower = norm(searchTitle || '');
-        const hasListKeyword = /\boraz\b|[&+]/.test(titleLower);
+        const hasListKeyword = /\boraz\b/.test(titleLower);
         if (hasListKeyword && campsWithAnyMatch >= 2) {
             return { camp: '', needsReview: true };
         }
@@ -459,7 +459,7 @@ export const normalizeTransaction = async (row, camps = []) => {
 
         // 4. Clear winner by score gap
         const relativeGap = highestScore > 0 ? (highestScore - secondBestScore) / highestScore : 1;
-        const requiredGap = campsWithAnyMatch >= 3 ? 0.50 : (campsWithAnyMatch >= 2 ? 0.35 : 0.25);
+        const requiredGap = campsWithAnyMatch >= 3 ? 0.40 : (campsWithAnyMatch >= 2 ? 0.25 : 0.20);
         const isConfident = bestHasAnyMatch && highestScore >= 0.08 && (
             secondBestScore === 0 || relativeGap >= requiredGap
         );
