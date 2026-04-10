@@ -322,6 +322,37 @@ export const normalizeTransaction = async (row, camps = []) => {
         const txTitleYear = extractYear(searchTitle || ''); // year mentioned in the transfer title
         const txMonth = transactionDate ? new Date(transactionDate).getMonth() + 1 : null;
 
+        // ── Pre-pass: unique token detection ──
+        // Build a map: token → which camps contain it.
+        // If a title token appears in ONLY ONE camp, that uniquely identifies the camp
+        // and we can auto-assign without going through full scoring.
+        // If title tokens uniquely identify TWO DIFFERENT camps → multi-camp payment.
+        const tokenCampIndex = new Map(); // token → [campName, ...]
+        for (const c of campsList) {
+            const cToks = extractTokens(c.name);
+            const tagWords = (c.tags || []).map(t => norm(t)).filter(t => t.length >= 2);
+            for (const tok of new Set([...cToks, ...tagWords])) {
+                if (!tokenCampIndex.has(tok)) tokenCampIndex.set(tok, []);
+                tokenCampIndex.get(tok).push(c.name);
+            }
+        }
+        const uniquelyIdentified = new Set(); // camp names uniquely pointed to by a title token
+        for (const txToken of titleTokens) {
+            if (txToken.length >= 4) {
+                const matches = tokenCampIndex.get(txToken);
+                if (matches && matches.length === 1) uniquelyIdentified.add(matches[0]);
+            }
+        }
+        if (uniquelyIdentified.size === 1) {
+            // One camp uniquely identified → auto-approve
+            return { camp: [...uniquelyIdentified][0], needsReview: false };
+        }
+        if (uniquelyIdentified.size >= 2) {
+            // Tokens from two different unique camps → multi-camp payment
+            return { camp: '', needsReview: true };
+        }
+        // No unique tokens → fall through to full scoring
+
         let bestMatch = '';
         let highestScore = 0;
         let secondBestScore = 0;
