@@ -404,20 +404,28 @@ export const normalizeTransaction = async (row, camps = []) => {
         // 1. No match at all
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
-        // 2. Only one camp matched anything → no competition → auto-approve
+        // 2. Multi-camp payment detection: title contains list keywords ("oraz", "i", "&", "+")
+        //    AND 2+ different camps matched → parent is paying for multiple camps at once
+        const titleLower = norm(searchTitle || '');
+        const hasListKeyword = /\boraz\b|\bi\b|[&+]/.test(titleLower);
+        if (hasListKeyword && campsWithAnyMatch >= 2) {
+            return { camp: '', needsReview: true };
+        }
+
+        // 3. Only one camp matched anything → no competition → auto-approve
         if (campsWithAnyMatch === 1) return { camp: bestMatch, needsReview: false };
 
-        // 3. Exactly one camp meets the word+date threshold → confident winner
+        // 4. Exactly one camp meets the word+date threshold → confident winner
         if (campsAboveThreshold === 1 && bestMeetsThreshold) {
             return { camp: bestMatch, needsReview: false };
         }
 
-        // 4. Multiple camps meet threshold → ambiguous, suggest best but flag for review
+        // 5. Multiple camps meet threshold → ambiguous, suggest best but flag for review
         if (campsAboveThreshold > 1) {
             return { camp: bestMatch, needsReview: true };
         }
 
-        // 5. No camp meets threshold → weak match, suggest best and flag for review
+        // 6. No camp meets threshold → weak match, suggest best and flag for review
         return { camp: bestMatch, needsReview: true };
     };
 
