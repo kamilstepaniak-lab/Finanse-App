@@ -414,14 +414,15 @@ export const normalizeTransaction = async (row, camps = []) => {
         }
 
         // ── Decision logic based on confidence ──
+        // Philosophy: better to flag for review (admin verifies fast) than auto-approve wrong match.
 
-        // 1. Multi-camp: 3+ camps have significant (>=50%) token matches → manual split needed
-        if (campsWithSignificantMatch >= 3) return { camp: bestMatch || '', needsReview: true };
+        // 1. Multi-camp: 2+ camps have significant (>=50%) token matches → ambiguous, review
+        if (campsWithSignificantMatch >= 2) return { camp: bestMatch || '', needsReview: true };
 
         // 2. No match at all
         if (!bestMatch || highestScore === 0) return { camp: '', needsReview: true };
 
-        // 3. SINGLE CAMP MATCH — if exactly one camp scored, auto-approve regardless of score
+        // 3. SINGLE CAMP MATCH — if exactly one camp scored, auto-approve
         //    e.g. "Gniewino" matches only one camp → no ambiguity → approve
         if (campsWithAnyMatch === 1 && bestHasAnyMatch) {
             return { camp: bestMatch, needsReview: false };
@@ -431,6 +432,7 @@ export const normalizeTransaction = async (row, camps = []) => {
         const relativeGap = highestScore > 0 ? scoreGap / highestScore : 1;
 
         // 4. Near-tie: scores within 10% — try date proximity to pick winner
+        //    But ALWAYS flag for review when near-tied (even with date proximity)
         if (relativeGap < 0.1 && tieCandidates.length > 1 && transactionDate) {
             const tDate = new Date(transactionDate);
             let closestName = null;
@@ -448,16 +450,16 @@ export const normalizeTransaction = async (row, camps = []) => {
                     }
                 }
             }
-            if (closestName && closestDiff <= 90) {
-                return { camp: closestName, needsReview: false };
-            }
-            return { camp: bestMatch, needsReview: true };
+            // Pick the closest by date, but always flag for manual review
+            return { camp: closestName || bestMatch, needsReview: true };
         }
 
-        // 5. Clear winner: meaningful gap over runner-up (lowered thresholds)
-        const isConfident = bestHasAnyMatch && highestScore >= 0.05 && (
-            secondBestScore === 0 ||    // only one camp matched at all
-            relativeGap >= 0.15         // winner is >=15% better than runner-up (was 25%)
+        // 5. Clear winner — requires increasingly larger gaps when more camps compete
+        //    With 2 matching camps: need 40% gap. With 3+: need 60% gap.
+        const requiredGap = campsWithAnyMatch >= 3 ? 0.60 : (campsWithAnyMatch >= 2 ? 0.40 : 0.25);
+        const isConfident = bestHasAnyMatch && highestScore >= 0.08 && (
+            secondBestScore === 0 ||        // only one camp matched at all
+            relativeGap >= requiredGap      // winner leads by enough
         );
 
         if (isConfident) return { camp: bestMatch, needsReview: false };

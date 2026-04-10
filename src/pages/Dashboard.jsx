@@ -227,25 +227,46 @@ export default function Dashboard() {
         await loadTransactions();
     };
 
+    // Check if any filters are currently active
+    const hasActiveFilters = !!(searchTerm || dateFrom || dateTo || filterCategory || filterCamp || filterReview || filterCampYear || (filterType && filterType !== 'income'));
+
     const autoAssignCampsToExisting = async () => {
-        if (!window.confirm("Ta operacja spróbuje automatycznie dobrać wyjazd do transakcji BEZ przypisanego obozu. Transakcje z już przypisanym obozem (nawet niepewne) nie będą zmieniane. Kontynuować?")) return;
+        const useFiltered = hasActiveFilters;
+        const confirmMsg = useFiltered
+            ? `Auto-dopasuj uruchomi się TYLKO na ${filteredTransactions?.length || 0} widocznych transakcjach (wg aktywnych filtrów). Transakcje z potwierdzonym obozem (bez flagi "do przejrzenia") nie zostaną nadpisane. Kontynuować?`
+            : "Ta operacja spróbuje automatycznie dobrać wyjazd do WSZYSTKICH transakcji bez pioruna (⚡). Kontynuować?";
+        if (!window.confirm(confirmMsg)) return;
 
         setLoading(true);
         try {
             let updatedCount = 0;
             let confirmedCount = 0;
+            let skippedConfirmed = 0;
             const requiresCamp = (category) => category && category.toLowerCase().includes('usługa turystyczna');
 
-            // Pobierz z bazy TYLKO transakcje gdzie auto_processed=false/null.
-            // Reszta (już przetworzona przez algorytm) jest pomijana — co admin z nimi zrobił nie ma znaczenia.
-            const unprocessed = await getUnprocessedTransactions();
+            let pool;
+            if (useFiltered) {
+                // Filtered mode: process only the visible transactions
+                pool = filteredTransactions || [];
+            } else {
+                // No filters: process only unprocessed transactions (no piorun)
+                pool = await getUnprocessedTransactions();
+            }
 
-            if (unprocessed.length === 0) {
-                alert('Brak nowych transakcji do przetworzenia — algorytm już wszystko przejrzał.');
+            if (pool.length === 0) {
+                alert(useFiltered
+                    ? 'Brak transakcji pasujących do aktywnych filtrów.'
+                    : 'Brak nowych transakcji do przetworzenia — algorytm już wszystko przejrzał.');
                 return;
             }
 
-            for (const t of unprocessed) {
+            for (const t of pool) {
+                // In filtered mode: skip transactions that already have a confirmed camp
+                if (useFiltered && t.camp && !t.needs_review) {
+                    skippedConfirmed++;
+                    continue;
+                }
+
                 const mockedRow = [t.date, t.amount, t.currency || 'PLN', t.sender, t.title];
                 const normalizedResult = await normalizeTransaction(mockedRow, camps);
                 const requiresCampForThis = requiresCamp(t.category || normalizedResult.category);
@@ -269,8 +290,9 @@ export default function Dashboard() {
             const msgs = [];
             if (updatedCount > 0) msgs.push(`Dopasowano obóz do ${updatedCount} transakcji`);
             if (confirmedCount > 0) msgs.push(`Potwierdzono kategorię dla ${confirmedCount} transakcji`);
-            const skipped = unprocessed.length - updatedCount - confirmedCount;
+            const skipped = pool.length - updatedCount - confirmedCount - skippedConfirmed;
             if (skipped > 0) msgs.push(`${skipped} bez dopasowania — do ręcznego uzupełnienia`);
+            if (skippedConfirmed > 0) msgs.push(`${skippedConfirmed} pominięto (już potwierdzone)`);
             alert(msgs.join('\n'));
         } catch (e) {
             console.error(e);
@@ -1044,10 +1066,13 @@ export default function Dashboard() {
                         className="btn-secondary"
                         onClick={autoAssignCampsToExisting}
                         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                        title="Spróbuj automatycznie przypisać wyjazdy do starszych transakcji w bazie"
+                        title={hasActiveFilters
+                            ? `Auto-dopasuj TYLKO widoczne transakcje (${filteredTransactions?.length || 0} szt.)`
+                            : "Auto-dopasuj wszystkie nieprzetworzone transakcje (bez ⚡)"
+                        }
                     >
                         <Wand2 size={16} />
-                        Auto-dopasuj
+                        Auto-dopasuj{hasActiveFilters ? ` (${filteredTransactions?.length || 0})` : ''}
                     </button>
                     <label className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer' }}>
                         <Upload size={16} />
@@ -1083,11 +1108,11 @@ export default function Dashboard() {
                                     <input type="checkbox" onChange={toggleAll} checked={selectedIds.size > 0 && selectedIds.size === filteredTransactions?.length} />
                                 </th>
                                 <th onClick={() => handleSort('date')} style={{ cursor: 'pointer' }}>Data{getSortIndicator('date')}</th>
-                                <th onClick={() => handleSort('sender')} style={{ cursor: 'pointer' }}>Nadawca / Odbiorca{getSortIndicator('sender')}</th>
                                 <th onClick={() => handleSort('title')} style={{ cursor: 'pointer' }}>Tytuł{getSortIndicator('title')}</th>
-                                <th onClick={() => handleSort('amount')} style={{ cursor: 'pointer' }}>Kwota{getSortIndicator('amount')}</th>
-                                <th onClick={() => handleSort('category')} style={{ cursor: 'pointer' }}>Kategoria{getSortIndicator('category')}</th>
                                 <th onClick={() => handleSort('camp')} style={{ cursor: 'pointer' }}>Wyjazd{getSortIndicator('camp')}</th>
+                                <th onClick={() => handleSort('category')} style={{ cursor: 'pointer' }}>Kategoria{getSortIndicator('category')}</th>
+                                <th onClick={() => handleSort('amount')} style={{ cursor: 'pointer' }}>Kwota{getSortIndicator('amount')}</th>
+                                <th onClick={() => handleSort('sender')} style={{ cursor: 'pointer' }}>Nadawca / Odbiorca{getSortIndicator('sender')}</th>
                                 <th style={{ textAlign: 'center', width: '140px' }}>Notatka</th>
                             </tr>
                         </thead>
@@ -1133,17 +1158,48 @@ export default function Dashboard() {
                                         />
                                     </td>
                                     <td>{t.date}</td>
-                                    <td>{t.sender}</td>
                                     <td>{t.title}</td>
-                                    <td className={t.amount > 0 ? 'amount-pos' : 'amount-neg'}>
-                                        {t.currency === 'EUR' ? (
-                                            <>
-                                                <div style={{ fontWeight: 700 }}>{t.original_amount?.toFixed(2)} EUR</div>
-                                                <div style={{ fontSize: '0.85em', fontWeight: 400, opacity: 0.8 }}>{t.amount.toFixed(2)} PLN</div>
-                                            </>
-                                        ) : (
-                                            <>{t.amount.toFixed(2)} PLN</>
-                                        )}
+                                    <td>
+                                        {children.length > 0 ? (
+                                            <span style={{ color: '#6D28D9', fontSize: '11px', fontWeight: 600, background: '#EDE9FE', padding: '2px 8px', borderRadius: '6px' }}>wg podziału</span>
+                                        ) : (() => {
+                                            const pendingCamp = pendingEdits[t.id]?.camp;
+                                            const displayCamp = pendingCamp !== undefined ? pendingCamp : (t.camp || '');
+                                            const hasPending = pendingEdits[t.id] !== undefined;
+                                            const effectiveCat = pendingEdits[t.id]?.category !== undefined ? pendingEdits[t.id].category : t.category;
+                                            return (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <select
+                                                        value={displayCamp}
+                                                        onChange={(e) => {
+                                                            handlePendingChange(t.id, 'camp', e.target.value);
+                                                        }}
+                                                        className={`category-select ${!hasPending && t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
+                                                        style={{
+                                                            width: '120px',
+                                                            ...(hasPending && pendingCamp !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {}),
+                                                            ...(!isTurystyczna(effectiveCat) ? { opacity: 0.4, pointerEvents: hasPending ? 'none' : 'auto' } : {})
+                                                        }}
+                                                        disabled={!isTurystyczna(effectiveCat)}
+                                                    >
+                                                        <option value="">-</option>
+                                                        {camps?.map(c => (
+                                                            <option key={c.id} value={c.name}>{c.name}</option>
+                                                        ))}
+                                                    </select>
+                                                    {hasPending ? (
+                                                        <>
+                                                            <button onClick={() => handleCommitEdit(t.id)} title="Zatwierdź zmiany"
+                                                                style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
+                                                            <button onClick={() => handleCancelEdit(t.id)} title="Anuluj zmiany"
+                                                                style={{ background: '#A3AED0', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
+                                                        </>
+                                                    ) : t.needs_review ? (
+                                                        <button className="confirm-btn" onClick={() => handleCampConfirm(t.id)} title="Zatwierdź dopasowanie">✓</button>
+                                                    ) : null}
+                                                </div>
+                                            );
+                                        })()}
                                     </td>
                                     <td>
                                         {children.length > 0 ? (
@@ -1204,48 +1260,17 @@ export default function Dashboard() {
                                             );
                                         })()}
                                     </td>
-                                    <td>
-                                        {children.length > 0 ? (
-                                            <span style={{ color: '#6D28D9', fontSize: '11px', fontWeight: 600, background: '#EDE9FE', padding: '2px 8px', borderRadius: '6px' }}>wg podziału</span>
-                                        ) : (() => {
-                                            const pendingCamp = pendingEdits[t.id]?.camp;
-                                            const displayCamp = pendingCamp !== undefined ? pendingCamp : (t.camp || '');
-                                            const hasPending = pendingEdits[t.id] !== undefined;
-                                            const effectiveCat = pendingEdits[t.id]?.category !== undefined ? pendingEdits[t.id].category : t.category;
-                                            return (
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                    <select
-                                                        value={displayCamp}
-                                                        onChange={(e) => {
-                                                            handlePendingChange(t.id, 'camp', e.target.value);
-                                                        }}
-                                                        className={`category-select ${!hasPending && t.needs_review ? (t.camp ? 'needs-review-select-uncertain' : 'needs-review-select-missing') : ''}`}
-                                                        style={{
-                                                            width: '120px',
-                                                            ...(hasPending && pendingCamp !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {}),
-                                                            ...(!isTurystyczna(effectiveCat) ? { opacity: 0.4, pointerEvents: hasPending ? 'none' : 'auto' } : {})
-                                                        }}
-                                                        disabled={!isTurystyczna(effectiveCat)}
-                                                    >
-                                                        <option value="">-</option>
-                                                        {camps?.map(c => (
-                                                            <option key={c.id} value={c.name}>{c.name}</option>
-                                                        ))}
-                                                    </select>
-                                                    {hasPending ? (
-                                                        <>
-                                                            <button onClick={() => handleCommitEdit(t.id)} title="Zatwierdź zmiany"
-                                                                style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
-                                                            <button onClick={() => handleCancelEdit(t.id)} title="Anuluj zmiany"
-                                                                style={{ background: '#A3AED0', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
-                                                        </>
-                                                    ) : t.needs_review ? (
-                                                        <button className="confirm-btn" onClick={() => handleCampConfirm(t.id)} title="Zatwierdź dopasowanie">✓</button>
-                                                    ) : null}
-                                                </div>
-                                            );
-                                        })()}
+                                    <td className={t.amount > 0 ? 'amount-pos' : 'amount-neg'}>
+                                        {t.currency === 'EUR' ? (
+                                            <>
+                                                <div style={{ fontWeight: 700 }}>{t.original_amount?.toFixed(2)} EUR</div>
+                                                <div style={{ fontSize: '0.85em', fontWeight: 400, opacity: 0.8 }}>{t.amount.toFixed(2)} PLN</div>
+                                            </>
+                                        ) : (
+                                            <>{t.amount.toFixed(2)} PLN</>
+                                        )}
                                     </td>
+                                    <td>{t.sender}</td>
                                     <td style={{ textAlign: 'center' }}>
                                         {t.note ? (
                                             <div
