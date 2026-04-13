@@ -358,6 +358,15 @@ export default function Dashboard() {
 
                 try {
                     await updateTransaction(result.id, updates);
+                    // Count based on needsReview — niezależnie od logActivity
+                    if (!result.needsReview) updatedCount++;
+                    else reviewCount++;
+                } catch (err) {
+                    console.error(`AI-dopasuj: błąd zapisu dla ${result.id}:`, err);
+                    reviewCount++;
+                }
+                // logActivity osobno — błąd nie wpływa na licznik ani zapis
+                try {
                     const t = pool.find(x => x.id === result.id);
                     if (t) {
                         await logActivity({
@@ -367,11 +376,8 @@ export default function Dashboard() {
                             message: `AI-dopasuj: "${t.title || ''}" → ${result.category || '?'}${result.camp ? ` · ${result.camp}` : ''}`,
                         });
                     }
-                    if (!result.needsReview) updatedCount++;
-                    else reviewCount++;
-                } catch (err) {
-                    console.error(`AI-dopasuj: błąd zapisu dla ${result.id}:`, err);
-                    reviewCount++;
+                } catch (logErr) {
+                    console.warn(`AI-dopasuj: logActivity failed dla ${result.id}:`, logErr);
                 }
             }
 
