@@ -104,6 +104,7 @@ export default async function handler(req, res) {
     };
 
     const allResults = [];
+    let debugInfo = null; // capture first batch for debugging
 
     for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
         const batch = transactions.slice(i, i + BATCH_SIZE);
@@ -115,18 +116,26 @@ export default async function handler(req, res) {
             });
 
             const raw = message.content[0].text.trim();
-            console.log(`Batch ${Math.floor(i / BATCH_SIZE) + 1} raw response (first 500 chars):`, raw.slice(0, 500));
+            console.log(`Batch ${Math.floor(i / BATCH_SIZE) + 1} raw (first 800):`, raw.slice(0, 800));
 
             const jsonMatch = raw.match(/\[[\s\S]*\]/);
             if (!jsonMatch) throw new Error('No JSON array in Claude response');
             const parsed = JSON.parse(jsonMatch[0]);
 
+            // Save debug info from first batch
+            if (i === 0) {
+                debugInfo = {
+                    rawSample: raw.slice(0, 600),
+                    parsedSample: parsed.slice(0, 3),
+                    campNormKeys: [...campNormMap.keys()].slice(0, 5),
+                };
+            }
+
             for (const item of parsed) {
                 const resolvedCamp = resolveCamp(item.camp);
                 const resolvedCategory = resolveCategory(item.category);
-                // If Claude matched a camp but validation failed, log it
                 if (item.camp && !resolvedCamp) {
-                    console.warn(`Camp not matched: Claude returned "${item.camp}", available camps: ${[...campNormMap.values()].join(', ')}`);
+                    console.warn(`Camp not resolved: Claude="${item.camp}" | normKey="${normStr(item.camp)}" | available: ${[...campNormMap.keys()].slice(0,10).join(', ')}`);
                 }
                 allResults.push({
                     id: item.id,
@@ -136,12 +145,13 @@ export default async function handler(req, res) {
                 });
             }
         } catch (err) {
-            console.error(`AI categorize batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, err);
+            console.error(`AI categorize batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, err.message);
+            if (i === 0) debugInfo = { error: err.message };
             for (const t of batch) {
                 allResults.push({ id: t.id, category: null, camp: null, needsReview: true });
             }
         }
     }
 
-    return res.status(200).json({ results: allResults });
+    return res.status(200).json({ results: allResults, debug: debugInfo });
 }

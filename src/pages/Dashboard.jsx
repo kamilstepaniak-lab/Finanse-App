@@ -342,7 +342,11 @@ export default function Dashboard() {
                 throw new Error(err.error || `HTTP ${response.status}`);
             }
 
-            const { results } = await response.json();
+            const { results, debug } = await response.json();
+
+            // DEBUG — otwórz DevTools → Console żeby zobaczyć
+            console.log('AI-dopasuj results (pierwsze 5):', results.slice(0, 5));
+            if (debug) console.log('AI-dopasuj debug:', debug);
 
             let updatedCount = 0;
             let reviewCount = 0;
