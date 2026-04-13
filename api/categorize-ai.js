@@ -8,6 +8,13 @@ import Anthropic from '@anthropic-ai/sdk';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const BATCH_SIZE = 20;
 
+// Normalize string: lowercase + strip Polish diacritics
+const normStr = (s) => {
+    if (!s) return '';
+    const MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z' };
+    return s.toLowerCase().split('').map(c => MAP[c] || c).join('').trim();
+};
+
 function buildPrompt(batch, categories, camps) {
     const campList = camps.length > 0
         ? camps.map(c =>
@@ -41,15 +48,16 @@ Zasady kategoryzacji:
 - Zwrot pieniędzy → "Zwrot", camp: null
 - Faktury, zakupy → odpowiednia kategoria, camp: null
 
-Zasady needsReview — WAŻNE, bądź zdecydowany:
-- needsReview: FALSE (pewny) gdy:
-  * kwota ujemna → Koszt (zawsze pewne)
-  * tytuł/nadawca jednoznacznie wskazuje kategorię (np. "basen", "lekcje pływania", "faktura")
-  * kategoria to "usługa turystyczna" i udało się dopasować konkretny wyjazd z listy
-  * kategoria nie wymaga wyjazdu (nauka pływania, Koszt, Szkolenie, Zwrot, itp.)
-- needsReview: TRUE (niepewny) gdy:
-  * tytuł jest całkowicie niezrozumiały lub ogólny (np. samo imię/nazwisko bez kontekstu)
-  * kategoria to "usługa turystyczna" ale NIE udało się dopasować żadnego wyjazdu z listy
+Dopasowanie wyjazdu — kluczowe:
+- Ignoruj imiona i nazwiska klientów w tytule — to nie są nazwy obozów
+- "REJS LICEALISTOW MAZURY" → szukaj wyjazdu z "rejs" i "licealistow" w nazwie
+- Tytuł może zawierać nazwę obozu pisaną bez polskich znaków — porównuj fonetycznie
+- Jeśli tytuł zawiera słowa które wyraźnie pasują do nazwy/tagów JEDNEGO wyjazdu → dopasuj go
+
+Zasady needsReview:
+- needsReview: false gdy kategoria jest pewna i (dla usługi turystycznej) udało się dopasować wyjazd
+- needsReview: false gdy kategoria nie wymaga wyjazdu (Koszt, nauka pływania, Szkolenie, Zwrot)
+- needsReview: true TYLKO gdy tytuł jest całkowicie nieczytelny LUB gdy "usługa turystyczna" ale żaden wyjazd z listy nie pasuje
 
 Odpowiedz TYLKO tablicą JSON (bez markdown, bez komentarzy) w tej samej kolejności co transakcje:
 [
@@ -70,8 +78,31 @@ export default async function handler(req, res) {
     if (!Array.isArray(camps))
         return res.status(400).json({ error: 'camps array required' });
 
-    const campNames = new Set(camps.map(c => c.name));
+    // Build normalized lookup: normStr(campName) → original campName
+    // This lets us match Claude's response even if it drops Polish characters
+    const campNormMap = new Map();
+    camps.forEach(c => campNormMap.set(normStr(c.name), c.name));
+
     const categorySet = new Set(categories);
+    const categoryNormMap = new Map();
+    categories.forEach(c => categoryNormMap.set(normStr(c), c));
+
+    const resolveCamp = (name) => {
+        if (!name) return null;
+        // Try exact match first
+        if (campNormMap.has(normStr(name))) return campNormMap.get(normStr(name));
+        return null;
+    };
+
+    const resolveCategory = (cat) => {
+        if (!cat) return null;
+        if (categorySet.has(cat)) return cat;
+        // Try normalized match
+        const norm = normStr(cat);
+        if (categoryNormMap.has(norm)) return categoryNormMap.get(norm);
+        return null;
+    };
+
     const allResults = [];
 
     for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
@@ -84,15 +115,23 @@ export default async function handler(req, res) {
             });
 
             const raw = message.content[0].text.trim();
+            console.log(`Batch ${Math.floor(i / BATCH_SIZE) + 1} raw response (first 500 chars):`, raw.slice(0, 500));
+
             const jsonMatch = raw.match(/\[[\s\S]*\]/);
             if (!jsonMatch) throw new Error('No JSON array in Claude response');
             const parsed = JSON.parse(jsonMatch[0]);
 
             for (const item of parsed) {
+                const resolvedCamp = resolveCamp(item.camp);
+                const resolvedCategory = resolveCategory(item.category);
+                // If Claude matched a camp but validation failed, log it
+                if (item.camp && !resolvedCamp) {
+                    console.warn(`Camp not matched: Claude returned "${item.camp}", available camps: ${[...campNormMap.values()].join(', ')}`);
+                }
                 allResults.push({
                     id: item.id,
-                    category: categorySet.has(item.category) ? item.category : null,
-                    camp: campNames.has(item.camp) ? item.camp : null,
+                    category: resolvedCategory,
+                    camp: resolvedCamp,
                     needsReview: item.needsReview !== false && item.needsReview !== 'false',
                 });
             }
