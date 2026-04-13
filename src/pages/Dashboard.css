@@ -608,6 +608,30 @@
 
 .btn-secondary:hover { background: #EFF6FF; }
 
+.btn-ai-categorize {
+    height: 36px;
+    padding: 0 16px;
+    background: transparent;
+    color: #7C3AED;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1.5px solid #7C3AED;
+    transition: all 0.15s;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.btn-ai-categorize:hover { background: #F5F3FF; }
+
+.btn-ai-categorize:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* ── Pending edit highlight ── */
 .pending-edit-highlight {
     border: 2px dashed #4318FF !important;

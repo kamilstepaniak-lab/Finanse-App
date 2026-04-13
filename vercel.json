@@ -5,7 +5,8 @@
   "framework": "vite",
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
   "functions": {
-    "api/social/plan-month.js": { "maxDuration": 60 }
+    "api/social/plan-month.js": { "maxDuration": 60 },
+    "api/categorize-ai.js": { "maxDuration": 60 }
   },
   "crons": [
     {

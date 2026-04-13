@@ -19,7 +19,7 @@ import {
     unsubscribe
 } from '../db';
 import { parseCSV, normalizeTransaction } from '../utils/csvParser';
-import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Zap, Calendar } from 'lucide-react';
+import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Zap, Calendar, Sparkles } from 'lucide-react';
 import './Dashboard.css';
 
 // Normalize strings for deduplication — collapse whitespace, lowercase
@@ -297,6 +297,88 @@ export default function Dashboard() {
         } catch (e) {
             console.error(e);
             alert("Błąd automatycznego dopasowania: " + e.message);
+        } finally {
+            setLoading(false);
+            loadData();
+        }
+    };
+
+    const aiCategorize = async () => {
+        const pool = transactions.filter(t => t.needs_review === true && !t.parent_id);
+
+        if (pool.length === 0) {
+            alert('Brak transakcji oznaczonych "do przejrzenia". Nie ma czego kategoryzować.');
+            return;
+        }
+
+        if (!window.confirm(
+            `AI-dopasuj przeanalizuje ${pool.length} transakcji oznaczonych do przejrzenia.\n` +
+            `Claude przypisze kategorię i wyjazd jednocześnie.\n` +
+            `Istniejące wartości zostaną nadpisane. Kontynuować?`
+        )) return;
+
+        setLoading(true);
+        try {
+            const payload = {
+                transactions: pool.map(t => ({
+                    id: t.id,
+                    title: t.title,
+                    sender: t.sender,
+                    amount: t.amount,
+                    date: t.date,
+                })),
+                categories: categories.map(c => c.name),
+                camps: camps.map(c => ({ name: c.name, tags: c.tags || [], year: c.year, season: c.season })),
+            };
+
+            const response = await fetch('/api/categorize-ai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${response.status}`);
+            }
+
+            const { results } = await response.json();
+
+            let updatedCount = 0;
+            let reviewCount = 0;
+
+            for (const result of results) {
+                const updates = { needs_review: result.needsReview };
+                if (result.category) updates.category = result.category;
+                if (result.camp) updates.camp = result.camp;  // only write when Claude matched a camp
+
+                try {
+                    await updateTransaction(result.id, updates);
+                    const t = pool.find(x => x.id === result.id);
+                    if (t) {
+                        await logActivity({
+                            action: 'ai_categorize',
+                            transactionId: result.id,
+                            snapshot: { ...t, ...updates },
+                            message: `AI-dopasuj: "${t.title || ''}" → ${result.category || '?'}${result.camp ? ` · ${result.camp}` : ''}`,
+                        });
+                    }
+                    if (!result.needsReview) updatedCount++;
+                    else reviewCount++;
+                } catch (err) {
+                    console.error(`AI-dopasuj: błąd zapisu dla ${result.id}:`, err);
+                    reviewCount++;
+                }
+            }
+
+            alert(
+                `AI-dopasuj zakończone.\n` +
+                `Pewnie dopasowano: ${updatedCount}\n` +
+                `Nadal do przejrzenia: ${reviewCount}`
+            );
+        } catch (e) {
+            console.error(e);
+            alert('Błąd AI-dopasuj: ' + e.message);
         } finally {
             setLoading(false);
             loadData();
@@ -1084,6 +1166,15 @@ export default function Dashboard() {
                     >
                         <Wand2 size={16} />
                         Auto-dopasuj{hasActiveFilters ? ` (${filteredTransactions?.length || 0})` : ''}
+                    </button>
+                    <button
+                        className="btn-ai-categorize"
+                        onClick={aiCategorize}
+                        disabled={loading}
+                        title="AI analizuje tytuł, nadawcę i kwotę — przypisuje kategorię i wyjazd jednocześnie dla transakcji 'do przejrzenia'"
+                    >
+                        <Sparkles size={16} />
+                        AI-dopasuj
                     </button>
                     <label className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer' }}>
                         <Upload size={16} />
