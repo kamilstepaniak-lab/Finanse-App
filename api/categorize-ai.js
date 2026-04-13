@@ -103,55 +103,56 @@ export default async function handler(req, res) {
         return null;
     };
 
-    const allResults = [];
-    let debugInfo = null; // capture first batch for debugging
-
+    // Split into batches
+    const batches = [];
     for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
-        const batch = transactions.slice(i, i + BATCH_SIZE);
-        try {
-            const message = await anthropic.messages.create({
-                model: 'claude-sonnet-4-6',
-                max_tokens: 4096,
-                messages: [{ role: 'user', content: buildPrompt(batch, categories, camps) }],
-            });
-
-            const raw = message.content[0].text.trim();
-            console.log(`Batch ${Math.floor(i / BATCH_SIZE) + 1} raw (first 800):`, raw.slice(0, 800));
-
-            const jsonMatch = raw.match(/\[[\s\S]*\]/);
-            if (!jsonMatch) throw new Error('No JSON array in Claude response');
-            const parsed = JSON.parse(jsonMatch[0]);
-
-            // Save debug info from first batch
-            if (i === 0) {
-                debugInfo = {
-                    rawSample: raw.slice(0, 600),
-                    parsedSample: parsed.slice(0, 3),
-                    campNormKeys: [...campNormMap.keys()].slice(0, 5),
-                };
-            }
-
-            for (const item of parsed) {
-                const resolvedCamp = resolveCamp(item.camp);
-                const resolvedCategory = resolveCategory(item.category);
-                if (item.camp && !resolvedCamp) {
-                    console.warn(`Camp not resolved: Claude="${item.camp}" | normKey="${normStr(item.camp)}" | available: ${[...campNormMap.keys()].slice(0,10).join(', ')}`);
-                }
-                allResults.push({
-                    id: item.id,
-                    category: resolvedCategory,
-                    camp: resolvedCamp,
-                    needsReview: item.needsReview !== false && item.needsReview !== 'false',
-                });
-            }
-        } catch (err) {
-            console.error(`AI categorize batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, err.message);
-            if (i === 0) debugInfo = { error: err.message };
-            for (const t of batch) {
-                allResults.push({ id: t.id, category: null, camp: null, needsReview: true });
-            }
-        }
+        batches.push(transactions.slice(i, i + BATCH_SIZE));
     }
+
+    // Process all batches in parallel
+    const batchResults = await Promise.allSettled(batches.map(async (batch, idx) => {
+        const message = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 4096,
+            messages: [{ role: 'user', content: buildPrompt(batch, categories, camps) }],
+        });
+
+        const raw = message.content[0].text.trim();
+        console.log(`Batch ${idx + 1} raw (first 400):`, raw.slice(0, 400));
+
+        const jsonMatch = raw.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) throw new Error(`Batch ${idx + 1}: no JSON array in response`);
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        return parsed.map(item => {
+            const resolvedCamp = resolveCamp(item.camp);
+            const resolvedCategory = resolveCategory(item.category);
+            if (item.camp && !resolvedCamp) {
+                console.warn(`Camp not resolved: Claude="${item.camp}" normKey="${normStr(item.camp)}"`);
+            }
+            return {
+                id: item.id,
+                category: resolvedCategory,
+                camp: resolvedCamp,
+                needsReview: item.needsReview !== false && item.needsReview !== 'false',
+            };
+        });
+    }));
+
+    const allResults = [];
+    const debugInfo = { batches: batches.length, errors: [] };
+
+    batchResults.forEach((result, idx) => {
+        if (result.status === 'fulfilled') {
+            allResults.push(...result.value);
+        } else {
+            console.error(`Batch ${idx + 1} failed:`, result.reason?.message);
+            debugInfo.errors.push(`Batch ${idx + 1}: ${result.reason?.message}`);
+            batches[idx].forEach(t =>
+                allResults.push({ id: t.id, category: null, camp: null, needsReview: true })
+            );
+        }
+    });
 
     return res.status(200).json({ results: allResults, debug: debugInfo });
 }
