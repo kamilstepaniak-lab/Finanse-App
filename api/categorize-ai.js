@@ -34,14 +34,22 @@ TRANSAKCJE:
 ${txList}
 
 Zasady kategoryzacji:
-- Kwota ujemna → zawsze "Koszt"
+- Kwota ujemna → zawsze kategoria "Koszt", camp: null
 - Wpłata za obóz/wyjazd → "usługa turystyczna" + dopasuj wyjazd po nazwie lokalizacji, roku, sezonie
-- Lekcje pływania, basen, treningi → "nauka pływania"
-- Szkolenia bez lokalizacji obozu → "Szkolenie"
-- Zwrot pieniędzy → "Zwrot"
-- Faktury, zakupy → odpowiednia kategoria
-- camp: null gdy kwota ujemna lub brak pasującego wyjazdu
-- needsReview: true gdy tytuł/nadawca jest niejednoznaczny lub nie pasuje do żadnego wyjazdu z listy
+- Lekcje pływania, basen, treningi → "nauka pływania", camp: null
+- Szkolenia bez lokalizacji obozu → "Szkolenie", camp: null
+- Zwrot pieniędzy → "Zwrot", camp: null
+- Faktury, zakupy → odpowiednia kategoria, camp: null
+
+Zasady needsReview — WAŻNE, bądź zdecydowany:
+- needsReview: FALSE (pewny) gdy:
+  * kwota ujemna → Koszt (zawsze pewne)
+  * tytuł/nadawca jednoznacznie wskazuje kategorię (np. "basen", "lekcje pływania", "faktura")
+  * kategoria to "usługa turystyczna" i udało się dopasować konkretny wyjazd z listy
+  * kategoria nie wymaga wyjazdu (nauka pływania, Koszt, Szkolenie, Zwrot, itp.)
+- needsReview: TRUE (niepewny) gdy:
+  * tytuł jest całkowicie niezrozumiały lub ogólny (np. samo imię/nazwisko bez kontekstu)
+  * kategoria to "usługa turystyczna" ale NIE udało się dopasować żadnego wyjazdu z listy
 
 Odpowiedz TYLKO tablicą JSON (bez markdown, bez komentarzy) w tej samej kolejności co transakcje:
 [
