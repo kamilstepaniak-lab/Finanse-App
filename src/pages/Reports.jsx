@@ -133,7 +133,15 @@ export default function Reports() {
         const incomeEURByCampMap = {};
 
         filtered.filter(t => t.amount > 0).forEach(t => {
-            const campName = t.camp || 'Bez wyjazdu';
+            const isTurystyczna = t.category && t.category.toLowerCase().includes('turystyczna');
+            let campName;
+            if (t.camp) {
+                campName = t.camp;
+            } else if (isTurystyczna) {
+                campName = 'Bez wyjazdu'; // usługa turystyczna bez przypisanego wyjazdu
+            } else {
+                campName = 'Pozostałe przychody'; // inne kategorie bez wyjazdu
+            }
             if (!incomeByCampMap[campName]) incomeByCampMap[campName] = 0;
             incomeByCampMap[campName] += t.amount;
 
@@ -181,7 +189,7 @@ export default function Reports() {
         const topContractors = Object.values(senderMap).sort((a, b) => b.total - a.total).slice(0, 20);
 
         // Camp profitability (income - expense per camp)
-        // Costs without a camp → "Koszty ogólne", unmatched income → "Bez wyjazdu"
+        // Costs without a camp → "Koszty ogólne", unmatched income → "Bez wyjazdu" or "Pozostałe przychody"
         const campProfitMap = {};
         filtered.forEach(t => {
             let campName;
@@ -190,7 +198,8 @@ export default function Reports() {
             } else if (t.amount < 0) {
                 campName = 'Koszty ogólne';
             } else {
-                campName = 'Bez wyjazdu';
+                const isTurystyczna = t.category && t.category.toLowerCase().includes('turystyczna');
+                campName = isTurystyczna ? 'Bez wyjazdu' : 'Pozostałe przychody';
             }
             if (!campProfitMap[campName]) campProfitMap[campName] = { name: campName, income: 0, expense: 0 };
             if (t.amount > 0) campProfitMap[campName].income += t.amount;
