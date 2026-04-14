@@ -92,7 +92,7 @@ export const updateTransaction = async (id, updates) => {
 export const deleteTransaction = async (id) => {
     const { error } = await supabase
         .from('transactions')
-        .delete()
+        .update({ is_deleted: true })
         .eq('id', id);
 
     if (error) {

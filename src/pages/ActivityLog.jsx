@@ -3,14 +3,19 @@ import { getActivityLog, clearActivityLog } from '../db';
 import './Dashboard.css';
 
 const ACTION_META = {
-    create:           { label: 'Utworzone',     bg: '#DCFCE7', fg: '#166534' },
-    update:           { label: 'Zmienione',     bg: '#DBEAFE', fg: '#1E40AF' },
-    delete:           { label: 'Usunięte',      bg: '#FEE2E2', fg: '#991B1B' },
-    split_add:        { label: 'Dodany podział', bg: '#EDE9FE', fg: '#6D28D9' },
+    create:           { label: 'Utworzone',       bg: '#DCFCE7', fg: '#166534' },
+    update:           { label: 'Zmienione',       bg: '#DBEAFE', fg: '#1E40AF' },
+    delete:           { label: 'Usunięte',        bg: '#FEE2E2', fg: '#991B1B' },
+    split_add:        { label: 'Dodany podział',  bg: '#EDE9FE', fg: '#6D28D9' },
     split_delete:     { label: 'Usunięty podział', bg: '#FCE7F3', fg: '#9D174D' },
-    csv_import:       { label: 'Import CSV',    bg: '#FEF3C7', fg: '#92400E' },
-    category_confirm: { label: 'Potwierdzenie', bg: '#CCFBF1', fg: '#0F766E' },
-    note_update:      { label: 'Notatka',       bg: '#F3F4F6', fg: '#374151' },
+    split_confirm:    { label: 'Split potwierdz.', bg: '#CCFBF1', fg: '#0F766E' },
+    csv_import:       { label: 'Import CSV',      bg: '#FEF3C7', fg: '#92400E' },
+    category_confirm: { label: 'Potwierdzenie',   bg: '#CCFBF1', fg: '#0F766E' },
+    note_update:      { label: 'Notatka',         bg: '#F3F4F6', fg: '#374151' },
+    bulk_delete:      { label: 'Usunięte zbiorczo', bg: '#FEE2E2', fg: '#991B1B' },
+    bulk_category:    { label: 'Kategoria zbiorczo', bg: '#DBEAFE', fg: '#1E40AF' },
+    bulk_camp:        { label: 'Wyjazd zbiorczo', bg: '#DBEAFE', fg: '#1E40AF' },
+    ai_categorize:    { label: 'AI-dopasuj',      bg: '#F3E8FF', fg: '#7C3AED' },
 };
 
 const PAGE_SIZE = 50;

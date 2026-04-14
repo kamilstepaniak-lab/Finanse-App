@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
 import {
     getAllTransactions,
     getAllCategories,
@@ -28,10 +27,24 @@ const normalizeDedupKey = (str) => {
     return str.trim().replace(/\s+/g, ' ').toLowerCase();
 };
 
+// Normalize amount to fixed 2-decimal string: "123.450" and "123.45" both → "123.45"
+const normalizeAmount = (val) => parseFloat(String(val)).toFixed(2);
+
+// Normalize date to YYYY-MM-DD: handles "2024-1-15" → "2024-01-15"
+const normalizeDate = (d) => {
+    if (!d) return '';
+    const parts = String(d).split('-');
+    if (parts.length === 3) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+    return d;
+};
+
 export default function Dashboard() {
     const [transactions, setTransactions] = useState([]);
     const [categories, setCategories] = useState([]);
     const [camps, setCamps] = useState([]);
+    const activeCamps = (camps || []).filter(c => !c.is_completed);
+    // Exclude "Koszt" from dynamic list — it's always added as a hardcoded option
+    const displayCategories = (categories || []).filter(c => c.name !== 'Koszt');
     const [selectedIds, setSelectedIds] = useState(new Set());
     // Applied filter state (drives actual filtering)
     const [searchTerm, setSearchTerm] = useState('');
@@ -212,18 +225,44 @@ export default function Dashboard() {
 
     const handleBulkCategory = async (cat) => {
         if (!selectedIds.size || !cat) return;
-        await Promise.all(
-            Array.from(selectedIds).map(id => updateTransaction(id, { category: cat }))
-        );
+        const ids = Array.from(selectedIds);
+        const changes = [];
+        for (const id of ids) {
+            const tx = transactions.find(t => t.id === id);
+            if (tx && tx.category !== cat) {
+                changes.push({ id, from: tx.category || '—', title: tx.title || '' });
+            }
+        }
+        await Promise.all(ids.map(id => updateTransaction(id, { category: cat })));
+        if (changes.length > 0) {
+            await logActivity({
+                action: 'bulk_category',
+                message: `Zmieniono kategorię na "${cat}" dla ${changes.length} transakcji`,
+                details: { category: cat, changes: changes.map(c => ({ id: c.id, from: c.from, title: c.title })) },
+            });
+        }
         setSelectedIds(new Set());
         await loadTransactions();
     };
 
     const handleBulkCamp = async (camp) => {
         if (!selectedIds.size || !camp) return;
-        await Promise.all(
-            Array.from(selectedIds).map(id => updateTransaction(id, { camp: camp }))
-        );
+        const ids = Array.from(selectedIds);
+        const changes = [];
+        for (const id of ids) {
+            const tx = transactions.find(t => t.id === id);
+            if (tx && tx.camp !== camp) {
+                changes.push({ id, from: tx.camp || '—', title: tx.title || '' });
+            }
+        }
+        await Promise.all(ids.map(id => updateTransaction(id, { camp })));
+        if (changes.length > 0) {
+            await logActivity({
+                action: 'bulk_camp',
+                message: `Zmieniono wyjazd na "${camp}" dla ${changes.length} transakcji`,
+                details: { camp, changes: changes.map(c => ({ id: c.id, from: c.from, title: c.title })) },
+            });
+        }
         await loadTransactions();
     };
 
@@ -242,11 +281,13 @@ export default function Dashboard() {
             let updatedCount = 0;
             let confirmedCount = 0;
             let skippedConfirmed = 0;
+            let reprocessedCount = 0;
             const requiresCamp = (category) => category && category.toLowerCase().includes('usługa turystyczna');
 
             let pool;
             if (useFiltered) {
-                // Filtered mode: process only the visible transactions
+                // Filtered mode: process ALL visible transactions (ignores auto_processed)
+                // User explicitly chose which transactions to re-run via filters
                 pool = filteredTransactions || [];
             } else {
                 // No filters: process only unprocessed transactions (no piorun)
@@ -256,7 +297,7 @@ export default function Dashboard() {
             if (pool.length === 0) {
                 alert(useFiltered
                     ? 'Brak transakcji pasujących do aktywnych filtrów.'
-                    : 'Brak nowych transakcji do przetworzenia — algorytm już wszystko przejrzał.');
+                    : 'Brak nowych transakcji do przetworzenia — algorytm już wszystko przejrzał.\nUżyj filtrów żeby ponowić dopasowanie wybranych transakcji.');
                 return;
             }
 
@@ -266,6 +307,7 @@ export default function Dashboard() {
                     skippedConfirmed++;
                     continue;
                 }
+                if (useFiltered && t.auto_processed) reprocessedCount++;
 
                 const mockedRow = [t.date, t.amount, t.currency || 'PLN', t.sender, t.title];
                 const normalizedResult = await normalizeTransaction(mockedRow, camps);
@@ -293,6 +335,7 @@ export default function Dashboard() {
             const skipped = pool.length - updatedCount - confirmedCount - skippedConfirmed;
             if (skipped > 0) msgs.push(`${skipped} bez dopasowania — do ręcznego uzupełnienia`);
             if (skippedConfirmed > 0) msgs.push(`${skippedConfirmed} pominięto (już potwierdzone)`);
+            if (reprocessedCount > 0) msgs.push(`(w tym ${reprocessedCount} przetworzonych ponownie)`);
             alert(msgs.join('\n'));
         } catch (e) {
             console.error(e);
@@ -328,7 +371,7 @@ export default function Dashboard() {
                     date: t.date,
                 })),
                 categories: categories.map(c => c.name),
-                camps: camps.map(c => ({ name: c.name, tags: c.tags || [], year: c.year, season: c.season })),
+                camps: activeCamps.map(c => ({ name: c.name, tags: c.tags || [], year: c.year, season: c.season })),
             };
 
             const response = await fetch('/api/categorize-ai', {
@@ -354,7 +397,7 @@ export default function Dashboard() {
             for (const result of results) {
                 const updates = { needs_review: result.needsReview };
                 if (result.category) updates.category = result.category;
-                if (result.camp) updates.camp = result.camp;  // only write when Claude matched a camp
+                updates.camp = result.camp || null;  // zawsze nadpisuj — null czyści stary obóz
 
                 try {
                     await updateTransaction(result.id, updates);
@@ -397,10 +440,10 @@ export default function Dashboard() {
 
     // Admin confirms the camp assignment — clears the needs_review flag
     // If the clicked transaction is part of a multi-selection, confirm ALL selected
-    const handleCampConfirm = (id) => {
+    const handleCampConfirm = async (id) => {
         const targetIds = (selectedIds.has(id) && selectedIds.size > 1) ? Array.from(selectedIds) : [id];
         setTransactions(prev => prev.map(t => targetIds.includes(t.id) ? { ...t, needs_review: false } : t));
-        Promise.all(targetIds.map(sid => updateTransaction(sid, { needs_review: false })));
+        await Promise.all(targetIds.map(sid => updateTransaction(sid, { needs_review: false })));
         // Log confirmation for each transaction
         targetIds.forEach(tid => {
             const t = transactions.find(x => x.id === tid);
@@ -469,10 +512,11 @@ export default function Dashboard() {
         const confirmMsg = `Usunąć podział ${snapshot.amount} ${snapshot.currency || 'PLN'}${snapshot.category ? ` (${snapshot.category})` : ''}?`;
         if (!window.confirm(confirmMsg)) return;
         setTransactions(prev => prev.filter(t => t.id !== id));
-        const { error } = await supabase.from('transactions').delete().eq('id', id);
-        if (error) {
+        try {
+            await deleteTransaction(id);
+        } catch (error) {
             console.error('Delete sub error:', error);
-            await loadTransactions(); // reload to restore if failed
+            await loadTransactions();
             return;
         }
         if (snapshot) {
@@ -504,6 +548,15 @@ export default function Dashboard() {
         }
         const signedAmount = cashForm.type === 'expense' ? -amountPLN : amountPLN;
 
+        // Auto-categorize if user didn't pick a category
+        let finalCategory = cashForm.category || '';
+        if (signedAmount < 0 && !finalCategory) finalCategory = 'Koszt';
+
+        // Determine needs_review: if category requires camp and camp is empty → flag it
+        const campRequired = isTurystyczna(finalCategory);
+        const finalCamp = cashForm.camp || '';
+        const needsReview = campRequired && !finalCamp;
+
         try {
             const created = await addTransaction({
                 date: cashForm.date,
@@ -511,10 +564,11 @@ export default function Dashboard() {
                 original_amount: originalAmount,
                 currency: cashForm.currency,
                 title: cashForm.title.trim(),
-                sender: cashForm.sender.trim() || (cashForm.type === 'expense' ? 'Gotówka' : 'Gotówka'),
-                category: cashForm.category || '',
-                camp: cashForm.camp || '',
-                needs_review: false,
+                sender: cashForm.sender.trim() || 'Gotówka',
+                category: finalCategory,
+                camp: finalCamp,
+                needs_review: needsReview,
+                auto_processed: true,
                 source_file: 'cash',
             });
             await logActivity({
@@ -538,7 +592,7 @@ export default function Dashboard() {
 
         setIsImporting(true);
         try {
-            const data = await parseCSV(file, camps);
+            const data = await parseCSV(file, activeCamps);
             console.log("Parsed Data:", data);
 
             // Convert field names to match Supabase schema (snake_case)
@@ -553,15 +607,16 @@ export default function Dashboard() {
                 camp: t.camp,
                 needs_review: t.needsReview ?? false,
                 auto_processed: true,   // algorytm widział tę transakcję podczas importu
-                source_file: t.sourceFile
+                source_file: t.sourceFile,
+                ...(t.note ? { note: t.note } : {})
             }));
 
             // Dedup: skip rows already in DB where ALL 4 fields are identical
             const existingTransactions = await getAllTransactionsIncludingDeleted();
             const toImport = formattedData.filter(newTx =>
                 !existingTransactions.some(ex =>
-                    ex.date === newTx.date &&
-                    String(ex.amount) === String(newTx.amount) &&
+                    normalizeDate(ex.date) === normalizeDate(newTx.date) &&
+                    normalizeAmount(ex.amount) === normalizeAmount(newTx.amount) &&
                     normalizeDedupKey(ex.title) === normalizeDedupKey(newTx.title) &&
                     normalizeDedupKey(ex.sender) === normalizeDedupKey(newTx.sender)
                 )
@@ -611,7 +666,7 @@ export default function Dashboard() {
             // Sort by id to keep the first-inserted one
             const sorted = [...all].sort((a, b) => (a.id < b.id ? -1 : 1));
             for (const tx of sorted) {
-                const key = `${tx.date}|${tx.amount}|${normalizeDedupKey(tx.title)}|${normalizeDedupKey(tx.sender)}`;
+                const key = `${normalizeDate(tx.date)}|${normalizeAmount(tx.amount)}|${normalizeDedupKey(tx.title)}|${normalizeDedupKey(tx.sender)}`;
                 if (seen.has(key)) {
                     idsToDelete.push(tx.id);
                 } else {
@@ -682,7 +737,14 @@ export default function Dashboard() {
                 const finalCamp = 'camp' in edits ? edits.camp : undefined;
                 const finalCategory = 'category' in edits ? edits.category : prevTx?.category;
                 const campRequired = isTurystyczna(finalCategory);
-                const needsReview = campRequired ? (finalCamp !== undefined ? !finalCamp : false) : false;
+                // Validate camp exists in camps list (prevent orphaned references)
+                const campValid = !finalCamp || camps.some(c => c.name === finalCamp);
+                if (finalCamp && !campValid) {
+                    console.warn(`Camp "${finalCamp}" not found in camps list — clearing`);
+                    edits.camp = '';
+                }
+                const effectiveCamp = campValid ? finalCamp : '';
+                const needsReview = campRequired ? (effectiveCamp !== undefined ? !effectiveCamp : false) : false;
                 const updates = { ...edits, needs_review: needsReview };
                 setTransactions(p => {
                     const tx = p.find(t => t.id === tid);
@@ -714,11 +776,24 @@ export default function Dashboard() {
             return next;
         });
 
-        // Clear needs_review on parent(s) after state update
+        // Clear needs_review on parent(s) — tylko jeśli WSZYSTKIE dzieci są już zatwierdzone
         setTimeout(() => {
             parentIdsToClear.forEach(pid => {
-                setTransactions(p => p.map(t => t.id === pid ? { ...t, needs_review: false } : t));
-                updateTransaction(pid, { needs_review: false });
+                setTransactions(p => {
+                    const siblings = p.filter(t => t.parent_id === pid);
+                    if (siblings.some(t => t.needs_review)) return p; // inne dzieci wciąż do przejrzenia
+                    updateTransaction(pid, { needs_review: false });
+                    const parent = p.find(t => t.id === pid);
+                    if (parent) {
+                        logActivity({
+                            action: 'split_confirm',
+                            transactionId: pid,
+                            snapshot: parent,
+                            message: `Zatwierdzono split: "${parent.title || ''}" — wszystkie dzieci potwierdzone`,
+                        });
+                    }
+                    return p.map(t => t.id === pid ? { ...t, needs_review: false } : t);
+                });
             });
         }, 0);
 
@@ -746,7 +821,6 @@ export default function Dashboard() {
         if (cat === 'usługa turystyczna') return { color: '#05CD99', fontWeight: 600 };
         if (cat === 'nauka pływania') return { color: '#4318FF', fontWeight: 600 };
         if (cat === 'Szkolenie') return { color: '#FFB547', fontWeight: 600 };
-        if (cat === 'Zwrot') return { color: '#7C3AED', fontWeight: 600 };
         return {};
     };
 
@@ -785,8 +859,10 @@ export default function Dashboard() {
         // Year filter: match camp year
         if (filterCampYear && t.camp) {
             const campObj = camps.find(c => c.name === t.camp);
-            if (campObj && campObj.year && String(campObj.year) !== filterCampYear) return false;
-            if (!campObj || !campObj.year) return false; // no year set → hide when filtering
+            // Try explicit year first, fall back to year extracted from camp name
+            const campYear = campObj?.year || (campObj?.name?.match(/\b(20\d{2})\b/)?.[1] ? parseInt(campObj.name.match(/\b(20\d{2})\b/)[1]) : null);
+            if (campYear && String(campYear) !== filterCampYear) return false;
+            if (!campYear) return false; // truly no year anywhere → hide when filtering by year
         }
 
         return true;
@@ -893,19 +969,18 @@ export default function Dashboard() {
     // All children from split parents that match the active filters
     const kpiChildren = Object.values(matchingChildrenByParent).flat();
     const kpiItems   = [...kpiParents, ...kpiChildren];
-    const kpiIncome  = kpiItems.filter(t => t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
+    const kpiIncome  = kpiItems.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
     const kpiExpense = kpiItems.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+
     const kpiBalance = kpiIncome - kpiExpense;
     const kpiCount   = kpiItems.length;
-    const kpiZwrot   = kpiItems.filter(t => t.category === 'Zwrot' && t.amount > 0).reduce((s, t) => s + t.amount, 0);
     // Review counters operate only on leaf parents (split parents never carry needs_review)
     const kpiReview      = kpiParents.filter(t => t.needs_review && t.camp).length;
     const kpiMissing     = kpiParents.filter(t => t.needs_review && !t.camp).length;
     const kpiNoCategory  = kpiParents.filter(t => !t.category || t.category === '').length;
     // New KPIs
-    const kpiNetProfit = kpiIncome - kpiExpense - kpiZwrot;
-    const kpiEurIncome = kpiItems.filter(t => t.currency === 'EUR' && t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
-    const kpiEurExpense = kpiItems.filter(t => t.currency === 'EUR' && t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+    const kpiEurIncome = kpiItems.filter(t => t.currency === 'EUR' && t.amount > 0).reduce((s, t) => s + (t.original_amount || 0), 0);
+    const kpiEurExpense = kpiItems.filter(t => t.currency === 'EUR' && t.amount < 0).reduce((s, t) => s + Math.abs(t.original_amount || 0), 0);
     const kpiCategorized = kpiItems.length > 0 ? Math.round((kpiItems.filter(t => t.category).length / kpiItems.length) * 100) : 100;
     const fmt = (n) => n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -943,33 +1018,12 @@ export default function Dashboard() {
                     </div>
                 </div>
                 <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: kpiNetProfit >= 0 ? 'linear-gradient(135deg,#1570EF,#0E5AC8)' : 'linear-gradient(135deg,#DC2626,#B91C1C)' }}>
-                        <DollarSign size={20} color="#fff" />
-                    </div>
-                    <div className="kpi-body">
-                        <span className="kpi-label">Zysk netto</span>
-                        <span className="kpi-value" style={{ color: kpiNetProfit >= 0 ? '#1570EF' : '#DC2626' }}>{fmt(kpiNetProfit)} PLN</span>
-                        {kpiZwrot > 0 && (
-                            <span className="kpi-badge" style={{ background: '#EDE9FE', color: '#6D28D9' }}>zwroty: {fmt(kpiZwrot)}</span>
-                        )}
-                    </div>
-                </div>
-                <div className="kpi-card">
                     <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,#FFB547,#FF8C00)' }}>
                         <Receipt size={20} color="#fff" />
                     </div>
                     <div className="kpi-body">
                         <span className="kpi-label">Transakcji</span>
                         <span className="kpi-value" style={{ color: '#1B2559' }}>{kpiCount.toLocaleString('pl-PL')}</span>
-                    </div>
-                </div>
-                <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: kpiCategorized === 100 ? 'linear-gradient(135deg,#05CD99,#00B385)' : 'linear-gradient(135deg,#F59E0B,#D97706)' }}>
-                        <PieChart size={20} color="#fff" />
-                    </div>
-                    <div className="kpi-body">
-                        <span className="kpi-label">Skategoryzowane</span>
-                        <span className="kpi-value" style={{ color: kpiCategorized === 100 ? '#05CD99' : '#D97706' }}>{kpiCategorized}%</span>
                     </div>
                 </div>
                 <div className="kpi-card">
@@ -1099,11 +1153,10 @@ export default function Dashboard() {
                         <span className="filter-field-label">Kategoria</span>
                         <select value={draft.filterCategory} onChange={e => setDraft(d => ({ ...d, filterCategory: e.target.value }))} className="filter-select">
                             <option value="">Wszystkie</option>
-                            {categories?.map(c => (
+                            {displayCategories.map(c => (
                                 <option key={c.id} value={c.name}>{c.name}</option>
                             ))}
                             <option value="Koszt">Koszt</option>
-                            <option value="Zwrot">Zwrot</option>
                         </select>
                     </div>
                     <div className="filter-field-group">
@@ -1168,6 +1221,7 @@ export default function Dashboard() {
                     <button
                         className="btn-secondary"
                         onClick={autoAssignCampsToExisting}
+                        disabled={loading || isImporting}
                         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                         title={hasActiveFilters
                             ? `Auto-dopasuj TYLKO widoczne transakcje (${filteredTransactions?.length || 0} szt.)`
@@ -1180,7 +1234,7 @@ export default function Dashboard() {
                     <button
                         className="btn-ai-categorize"
                         onClick={aiCategorize}
-                        disabled={loading}
+                        disabled={loading || isImporting}
                         title="AI analizuje tytuł, nadawcę i kwotę — przypisuje kategorię i wyjazd jednocześnie dla transakcji 'do przejrzenia'"
                     >
                         <Sparkles size={16} />
@@ -1295,7 +1349,7 @@ export default function Dashboard() {
                                                         disabled={!isTurystyczna(effectiveCat)}
                                                     >
                                                         <option value="">-</option>
-                                                        {camps?.map(c => (
+                                                        {activeCamps?.map(c => (
                                                             <option key={c.id} value={c.name}>{c.name}</option>
                                                         ))}
                                                     </select>
@@ -1363,11 +1417,10 @@ export default function Dashboard() {
                                                     }}
                                                 >
                                                     <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
-                                                    {categories?.map(c => (
+                                                    {displayCategories.map(c => (
                                                         <option key={c.id} value={c.name}>{c.name}</option>
                                                     ))}
                                                     <option value="Koszt">Koszt</option>
-                                                    <option value="Zwrot">Zwrot</option>
                                                 </select>
                                             );
                                         })()}
@@ -1477,9 +1530,8 @@ export default function Dashboard() {
                                                 style={pendingEdits[child.id]?.category !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {}}
                                             >
                                                 <option value="">-- Wybierz --</option>
-                                                {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                {displayCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                                 <option value="Koszt">Koszt</option>
-                                                <option value="Zwrot">Zwrot</option>
                                             </select>
                                         </td>
                                         <td>
@@ -1491,7 +1543,7 @@ export default function Dashboard() {
                                                     style={{ width: '100px', ...(pendingEdits[child.id]?.camp !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {}) }}
                                                 >
                                                     <option value="">-</option>
-                                                    {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                    {activeCamps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                                 </select>
                                                 {pendingEdits[child.id] && (
                                                     <>
@@ -1544,9 +1596,8 @@ export default function Dashboard() {
                                                 className="category-select"
                                             >
                                                 <option value="">-- Kategoria --</option>
-                                                {categories?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                {displayCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                                 <option value="Koszt">Koszt</option>
-                                                <option value="Zwrot">Zwrot</option>
                                             </select>
                                         </td>
                                         <td>
@@ -1558,7 +1609,7 @@ export default function Dashboard() {
                                                     style={{ width: '120px' }}
                                                 >
                                                     <option value="">- Wyjazd -</option>
-                                                    {camps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                    {activeCamps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                                 </select>
                                             )}
                                         </td>
@@ -1566,9 +1617,13 @@ export default function Dashboard() {
                                             <button onClick={() => handleAddSub(t.id)} style={{ background: '#4318FF', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}>+ Dodaj</button>
                                             <button onClick={() => {
                                                 setAddingSubFor(null);
-                                                // Clear needs_review on parent since split is now complete
-                                                setTransactions(prev => prev.map(tx => tx.id === t.id ? { ...tx, needs_review: false } : tx));
-                                                updateTransaction(t.id, { needs_review: false });
+                                                // Clear needs_review on parent tylko jeśli wszystkie dzieci zatwierdzone
+                                                setTransactions(prev => {
+                                                    const children = prev.filter(tx => tx.parent_id === t.id);
+                                                    if (children.some(tx => tx.needs_review)) return prev;
+                                                    updateTransaction(t.id, { needs_review: false });
+                                                    return prev.map(tx => tx.id === t.id ? { ...tx, needs_review: false } : tx);
+                                                });
                                             }} style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#2B3674', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}>Gotowe</button>
                                         </td>
                                     </tr>
@@ -1737,16 +1792,15 @@ export default function Dashboard() {
                                     <label>Kategoria</label>
                                     <select value={cashForm.category} onChange={e => setCashForm(f => ({ ...f, category: e.target.value }))}>
                                         <option value="">— Wybierz —</option>
-                                        {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                        {displayCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                         <option value="Koszt">Koszt</option>
-                                        <option value="Zwrot">Zwrot</option>
                                     </select>
                                 </div>
                                 <div className="cash-field">
                                     <label>Wyjazd</label>
                                     <select value={cashForm.camp} onChange={e => setCashForm(f => ({ ...f, camp: e.target.value }))}>
                                         <option value="">— Wybierz —</option>
-                                        {camps.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                        {activeCamps.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                     </select>
                                 </div>
                             </div>

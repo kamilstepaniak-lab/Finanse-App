@@ -52,12 +52,17 @@ export default function VatMarza() {
         return Array.from(s).sort();
     }, [transactions]);
 
+    // IDs of transactions that are split parents (have children) — excluded from sums to avoid double-counting
+    const splitParentIds = useMemo(() => {
+        return new Set(transactions.filter(t => t.parent_id).map(t => t.parent_id));
+    }, [transactions]);
+
     // Build financial data for one camp
     const buildCampData = (campName) => {
         const s = settings[campName] || {};
         const rate = parseFloat(s.rate) || null; // manual EUR→PLN rate
 
-        const campTx = transactions.filter(t => t.camp === campName && !t.parent_id);
+        const campTx = transactions.filter(t => t.camp === campName && !splitParentIds.has(t.id));
 
         // Income
         const incomes = campTx.filter(t => t.amount > 0);

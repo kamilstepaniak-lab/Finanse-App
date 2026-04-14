@@ -1,39 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAllCamps, addCamp, getCampByName, deleteCamp, updateCamp, renameCampInTransactions, getAllTransactions, subscribeToCamps, unsubscribe } from '../db';
-import { Trash2, Edit2, Check, X, RefreshCw, Info } from 'lucide-react';
-
-// Synced with csvParser.js — program identifiers (hero, prokids, family, sekcja, etc.)
-// are NOT stop-words because they distinguish camps at the same location.
-const STOP_WORDS = new Set([
-    'oboz', 'wyjazd', 'wycieczka', 'kolonia', 'turnus',
-    'lato', 'zima', 'leni', 'zimow', 'ferie', 'wakacje',
-    'letni', 'letnia', 'letnie', 'zimowy', 'zimowa', 'zimowe',
-    'sportowy', 'sportowa', 'sportowe',
-    'morski', 'morska', 'gorski', 'gorska',
-    'narciarski', 'narciarska',
-    'mlodziezowy', 'mlodziezowa', 'mlodziezowe',
-    'jezdziecki', 'taneczny', 'muzyczny', 'artystyczny',
-    'karnet', 'karnety',
-    'rata', 'doplata', 'dla', 'oraz', 'przelew', 'oplata', 'wplata',
-    'zaliczka', 'udzial', 'uczestnictwo', 'czesc',
-    'wlochy', 'austria', 'polska'
-]);
-
-const CHAR_MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z',
-                   'Ą':'A','Ć':'C','Ę':'E','Ł':'L','Ń':'N','Ó':'O','Ś':'S','Ź':'Z','Ż':'Z' };
-const norm = (s) => s.toLowerCase().split('').map(c => CHAR_MAP[c] || c).join('');
-
-const extractTagsFromName = (name) => {
-    const normalized = norm(name)
-        .replace(/\d{1,2}[-\/]\d{1,2}[.]\d{1,2}(?:[.\-\/]\d{2,4})?/g, ' ')
-        .replace(/\b\d{1,2}[.]\d{1,2}(?:[.]\d{2,4})?\b/g, ' ')
-        .replace(/\b\d{4}\b/g, ' ');
-    return normalized
-        .split(/[\s,;\-:()\[\]\/\\]+/)
-        .flatMap(t => t.split(/(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])/))
-        .map(t => t.replace(/[^a-z]/g, ''))
-        .filter(t => t.length >= 3 && !STOP_WORDS.has(t));
-};
+import { Trash2, Edit2, Check, X, RefreshCw, Info, CheckCircle2, Circle } from 'lucide-react';
+import { extractTagsFromName } from '../utils/campUtils';
 
 // Returns 'lato' for April–August, 'zima' otherwise
 const defaultSeasonForMonth = () => {
@@ -52,6 +20,7 @@ export default function Camps() {
     const [sortOrder, setSortOrder] = useState('asc');
     const [filterSeason, setFilterSeason] = useState('');
     const [filterYear, setFilterYear] = useState('');
+    const [filterCompleted, setFilterCompleted] = useState('active'); // 'active' | 'completed' | ''
 
     // Orphaned camp repair
     const [orphanedCamps, setOrphanedCamps] = useState([]);
@@ -216,13 +185,19 @@ export default function Camps() {
         for (const camp of allCamps) {
             // Try to extract year from name first, otherwise default to 2026
             const yearMatch = camp.name.match(/\b(20\d{2})\b/);
-            const year = yearMatch ? parseInt(yearMatch[1]) : 2026;
+            const year = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
             if (camp.year === year) continue;
             setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, year } : c));
             await updateCamp(camp.id, { year });
             updated++;
         }
         alert(`Zaktualizowano rok dla ${updated} obozów.`);
+    };
+
+    const handleToggleCompleted = async (camp) => {
+        const newVal = !camp.is_completed;
+        setCamps(prev => prev.map(c => c.id === camp.id ? { ...c, is_completed: newVal } : c));
+        await updateCamp(camp.id, { is_completed: newVal });
     };
 
     const handleSeasonChange = async (camp, newSeason) => {
@@ -264,12 +239,19 @@ export default function Camps() {
             const newAutoTags = extractTagsFromName(name);
             const manualTags = (camp?.tags || []).filter(t => !oldAutoTags.includes(t));
             const mergedTags = [...new Set([...newAutoTags, ...manualTags])];
-            setCamps(prev => prev.map(c => c.id === id ? { ...c, name, tags: mergedTags, season: editSeason, year } : c));
-            cancelEditing();
+            // Najpierw zapisz obóz w DB, potem transakcje — żeby móc cofnąć przy błędzie
             await updateCamp(id, { name, tags: mergedTags, season: editSeason, year });
             if (name !== originalName) {
-                await renameCampInTransactions(originalName, name);
+                try {
+                    await renameCampInTransactions(originalName, name);
+                } catch (renameErr) {
+                    // Cofnij nazwę obozu — dane muszą być spójne
+                    await updateCamp(id, { name: originalName, tags: camp?.tags || [], season: camp?.season || '', year: camp?.year ?? null });
+                    throw new Error('Nie udało się zaktualizować nazwy w transakcjach. Zmiany cofnięte.');
+                }
             }
+            setCamps(prev => prev.map(c => c.id === id ? { ...c, name, tags: mergedTags, season: editSeason, year } : c));
+            cancelEditing();
             await loadCamps();
         } catch (e) {
             console.error(e);
@@ -284,9 +266,12 @@ export default function Camps() {
     const filteredCamps = [...(camps || [])]
         .filter(c => !filterSeason || c.season === filterSeason)
         .filter(c => !filterYear || String(c.year) === filterYear)
+        .filter(c => filterCompleted === 'active' ? !c.is_completed : filterCompleted === 'completed' ? c.is_completed : true)
         .sort((a, b) => {
-            if (sortOrder === 'asc') return a.name.localeCompare(b.name);
-            return 0;
+            if (sortOrder === 'asc') return a.name.localeCompare(b.name, 'pl');
+            // Default: newest year first, then alphabetically
+            if (a.year !== b.year) return (b.year || 0) - (a.year || 0);
+            return a.name.localeCompare(b.name, 'pl');
         });
 
     const availableYears = [...new Set((camps || []).map(c => c.year).filter(Boolean))].sort();
@@ -400,6 +385,23 @@ export default function Camps() {
                     </div>
                 </div>
 
+                {/* Completed filter */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748B' }}>Status:</span>
+                    {[['active','Aktywne','#05CD99'],['completed','Zakończone','#94A3B8'],['','Wszystkie','#4318FF']].map(([val, label, color]) => (
+                        <button
+                            key={val}
+                            onClick={() => setFilterCompleted(val)}
+                            style={{
+                                padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                                border: `1px solid ${filterCompleted === val ? color : '#e0e5f2'}`,
+                                background: filterCompleted === val ? color : '#fff',
+                                color: filterCompleted === val ? '#fff' : '#64748B'
+                            }}
+                        >{label}</button>
+                    ))}
+                </div>
+
                 {/* Season + Year filter */}
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
                     {[['','Wszystkie','#4318FF'],['lato','☀️ Letnie','#B45309'],['zima','❄️ Zimowe','#1570EF']].map(([val, label, color]) => (
@@ -455,7 +457,7 @@ export default function Camps() {
                             const isEditing = editingId === camp.id;
 
                             return (
-                                <tr key={camp.id} style={{ borderBottom: '1px solid #F0F4FF' }}>
+                                <tr key={camp.id} style={{ borderBottom: '1px solid #F0F4FF', opacity: camp.is_completed ? 0.55 : 1 }}>
                                     {/* Title */}
                                     <td style={tdStyle}>
                                         {isEditing ? (
@@ -471,7 +473,10 @@ export default function Camps() {
                                                 style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cdd4e0', fontSize: '14px' }}
                                             />
                                         ) : (
-                                            <span style={{ fontSize: '14px', fontWeight: 600, color: '#0D1B3E' }}>{camp.name}</span>
+                                            <span style={{ fontSize: '14px', fontWeight: 600, color: camp.is_completed ? '#94A3B8' : '#0D1B3E', textDecoration: camp.is_completed ? 'line-through' : 'none' }}>
+                                                {camp.name}
+                                                {camp.is_completed && <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, color: '#94A3B8', textDecoration: 'none', display: 'inline-block' }}>zakończony</span>}
+                                            </span>
                                         )}
                                     </td>
 
@@ -595,6 +600,13 @@ export default function Camps() {
                                                 </>
                                             ) : (
                                                 <>
+                                                    <button
+                                                        onClick={() => handleToggleCompleted(camp)}
+                                                        title={camp.is_completed ? 'Oznacz jako aktywny' : 'Oznacz jako zakończony'}
+                                                        style={{ background: 'none', color: camp.is_completed ? '#05CD99' : '#CBD5E1', cursor: 'pointer', border: 'none' }}
+                                                    >
+                                                        {camp.is_completed ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                                                    </button>
                                                     <button onClick={() => startEditing(camp)} style={{ background: 'none', color: '#4318FF', cursor: 'pointer', border: 'none' }} title="Edytuj">
                                                         <Edit2 size={16} />
                                                     </button>

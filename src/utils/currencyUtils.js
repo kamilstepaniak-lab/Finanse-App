@@ -76,7 +76,7 @@ export const findRateForDate = async (date, currency = 'EUR') => {
         // Go back 1 day
         currentCheckDate.setDate(currentCheckDate.getDate() - 1);
     }
-    // Fallback: If totally failed, return 1? Or throw?
+    // Fallback: throw so the caller knows the rate is unknown
     console.warn(`Could not find NBP rate for ${date} within 7 days.`);
-    return 1; // 1:1 fallback
+    throw new Error(`Nie znaleziono kursu NBP dla ${date} (sprawdzono 7 dni wstecz). Sprawdź datę lub podaj kurs ręcznie.`);
 };

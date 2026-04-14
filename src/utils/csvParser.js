@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import { findRateForDate } from './currencyUtils';
+import { STOP_WORDS, norm as campNorm } from './campUtils';
 
 export const parseCSV = (file, camps = []) => {
     return new Promise((resolve, reject) => {
@@ -78,11 +79,15 @@ export const normalizeTransaction = async (row, camps = []) => {
     }
 
     // 4. Convert EUR to PLN
+    let rateMissing = false;
     if (currency === 'EUR') {
         originalAmount = amount;
-        const rate = await findRateForDate(date, 'EUR');
-        if (rate) {
+        try {
+            const rate = await findRateForDate(date, 'EUR');
             amount = parseFloat((amount * rate).toFixed(2));
+        } catch {
+            // NBP rate not found — keep EUR amount as-is, flag for review
+            rateMissing = true;
         }
     }
 
@@ -108,10 +113,7 @@ export const normalizeTransaction = async (row, camps = []) => {
         const lower = txt.toLowerCase();
         const lowerNoSpaces = lower.replace(/\s+/g, '');
 
-        // 1. Zwrot (refund) — highest priority
-        if (lower.includes('zwrot') || lower.includes('refund') || lower.includes('refundacja')) return 'Zwrot';
-
-        // 2. Nauka pływania (swimming lessons)
+        // 1. Nauka pływania (swimming lessons)
         if (
             lower.includes('plywani') ||
             lower.includes('basen') ||
@@ -140,8 +142,10 @@ export const normalizeTransaction = async (row, camps = []) => {
             'dluga polana', 'grapa'
         ];
         // Activity/product keywords that indicate a trip
+        // NOTE: 'pobyt' removed — too generic ("stay"), catches hotel invoices.
+        // Camp locations already catch trip-related stays at known locations.
         const TRIP_KEYWORDS = [
-            'oboz', 'turyst', 'pobyt', 'camp', 'rejs',
+            'oboz', 'camp', 'rejs',
             'zeglarski', 'windsurfing', 'adventure', 'summer',
             'licealist', 'polkolonia', 'kids trophy', 'kidstrophy',
             'mozn', 'family camp', 'wyjazd', 'wycieczka',
@@ -151,10 +155,20 @@ export const normalizeTransaction = async (row, camps = []) => {
             'liga', 'semi', 'karnet', 'sport camp', 'sport chill'
         ];
 
+        // Phrases that contain trip keywords but are NOT trips (taxes, campaigns, etc.)
+        const TRIP_EXCLUSIONS = ['podatek', 'kampania', 'klimatyczn', 'opłata turystyczn'];
+
+        // Word-boundary match: prevents "camp" matching inside "kampania"
+        const matchesKw = (text, kw) => {
+            if (kw.includes(' ')) return text.includes(kw);
+            return new RegExp('\\b' + kw).test(text);
+        };
+
         if (TRIP_LOCATIONS.some(loc => lower.includes(loc) || lowerNoSpaces.includes(loc))) {
             return 'usługa turystyczna';
         }
-        if (TRIP_KEYWORDS.some(kw => lower.includes(kw) || lowerNoSpaces.includes(kw))) {
+        const hasExclusion = TRIP_EXCLUSIONS.some(ex => lower.includes(ex));
+        if (!hasExclusion && TRIP_KEYWORDS.some(kw => matchesKw(lower, kw) || matchesKw(lowerNoSpaces, kw))) {
             return 'usługa turystyczna';
         }
 
@@ -198,32 +212,8 @@ export const normalizeTransaction = async (row, camps = []) => {
     const attemptAutoAssignCamp = ({ title: searchTitle, sender: searchSender }, campsList, transactionDate) => {
         if (!campsList || campsList.length === 0 || (!searchTitle && !searchSender)) return { camp: '', needsReview: false };
 
-        const CHAR_MAP = { 'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z' };
-        const norm = (s) => s.toLowerCase().split('').map(c => CHAR_MAP[c] || c).join('');
-
-        // Stop-words: generic terms that appear in many camps and DON'T distinguish them.
-        // IMPORTANT: program identifiers (hero, prokids, family, sekcja, etc.) are NOT stop-words
-        // because they distinguish e.g. "Hero Kluszkowce" from "ProKids Kluszkowce".
-        const STOP_WORDS = new Set([
-            // generic camp/trip terms
-            'oboz', 'wyjazd', 'wycieczka', 'kolonia', 'turnus',
-            // seasons
-            'lato', 'zima', 'leni', 'zimow', 'ferie', 'wakacje',
-            // adjectives
-            'letni', 'letnia', 'letnie', 'zimowy', 'zimowa', 'zimowe',
-            'sportowy', 'sportowa', 'sportowe',
-            'morski', 'morska', 'gorski', 'gorska',
-            'narciarski', 'narciarska',
-            'mlodziezowy', 'mlodziezowa', 'mlodziezowe',
-            'jezdziecki', 'taneczny', 'muzyczny', 'artystyczny',
-            // extra products
-            'karnet', 'karnety',
-            // payment terms
-            'rata', 'doplata', 'dla', 'oraz', 'przelew', 'oplata', 'wplata',
-            'zaliczka', 'udzial', 'uczestnictwo', 'czesc',
-            // countries (too broad)
-            'wlochy', 'austria', 'polska'
-        ]);
+        // norm() and STOP_WORDS imported from campUtils.js — single source of truth
+        const norm = campNorm;
 
         // Fuzzy prefix matching for Polish grammar (licealistow vs licealisty, gniewino vs gniewinie)
         const fuzzyTokenMatch = (token, tokenList) => {
@@ -234,7 +224,7 @@ export const normalizeTransaction = async (row, camps = []) => {
                 let commonLen = 0;
                 const limit = Math.min(token.length, other.length);
                 while (commonLen < limit && token[commonLen] === other[commonLen]) commonLen++;
-                if (commonLen / maxLen >= 0.7) return true;
+                if (commonLen >= 4 && commonLen / maxLen >= 0.6) return true;
             }
             return false;
         };
@@ -526,7 +516,8 @@ export const normalizeTransaction = async (row, camps = []) => {
         sender,
         category,
         camp: assignedCamp,
-        needsReview,
-        sourceFile: 'import'
+        needsReview: needsReview || rateMissing,
+        sourceFile: 'import',
+        ...(rateMissing ? { note: 'UWAGA: brak kursu NBP — kwota w EUR, nie przeliczona' } : {}),
     };
 };
