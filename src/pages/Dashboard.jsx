@@ -44,7 +44,8 @@ export default function Dashboard() {
     const [camps, setCamps] = useState([]);
     const activeCamps = (camps || []).filter(c => !c.is_completed);
     // Exclude "Koszt" from dynamic list — it's always added as a hardcoded option
-    const displayCategories = (categories || []).filter(c => c.name !== 'Koszt');
+    // Case-insensitive + trimmed comparison to avoid duplicates from accidental DB entries
+    const displayCategories = (categories || []).filter(c => (c.name || '').trim().toLowerCase() !== 'koszt');
     const [selectedIds, setSelectedIds] = useState(new Set());
     // Applied filter state (drives actual filtering)
     const [searchTerm, setSearchTerm] = useState('');
@@ -1050,7 +1051,6 @@ export default function Dashboard() {
     const kpiIncome  = kpiItems.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
     const kpiExpense = kpiItems.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
 
-    const kpiBalance = kpiIncome - kpiExpense;
     const kpiCount   = kpiItems.length;
     // Review counters operate only on leaf parents (split parents never carry needs_review)
     const kpiReview      = kpiParents.filter(t => t.needs_review && t.camp).length;
@@ -1059,7 +1059,6 @@ export default function Dashboard() {
     // New KPIs
     const kpiEurIncome = kpiItems.filter(t => t.currency === 'EUR' && t.amount > 0).reduce((s, t) => s + (t.original_amount || 0), 0);
     const kpiEurExpense = kpiItems.filter(t => t.currency === 'EUR' && t.amount < 0).reduce((s, t) => s + Math.abs(t.original_amount || 0), 0);
-    const kpiCategorized = kpiItems.length > 0 ? Math.round((kpiItems.filter(t => t.category).length / kpiItems.length) * 100) : 100;
     const fmt = (n) => n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     if (loading) {
@@ -1536,6 +1535,7 @@ export default function Dashboard() {
                                                 onClick={() => {
                                                     const newNote = window.prompt('Wpisz notatkę do tej transakcji:', t.note || '');
                                                     if (newNote !== null && newNote !== t.note) {
+                                                        setTransactions(prev => prev.map(tx => tx.id === t.id ? { ...tx, note: newNote } : tx));
                                                         updateTransaction(t.id, { note: newNote });
                                                         logActivity({
                                                             action: 'note_update',
@@ -1567,6 +1567,7 @@ export default function Dashboard() {
                                                 onClick={() => {
                                                     const newNote = window.prompt('Dodaj nową notatkę:', '');
                                                     if (newNote !== null && newNote.trim() !== '') {
+                                                        setTransactions(prev => prev.map(tx => tx.id === t.id ? { ...tx, note: newNote } : tx));
                                                         updateTransaction(t.id, { note: newNote });
                                                         logActivity({
                                                             action: 'note_update',
