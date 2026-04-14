@@ -480,6 +480,7 @@ export default function Dashboard() {
             currentAmount: '',
             currentCategory: parent.category || '',
             currentCamp: parent.camp || '',
+            isLastStep: false, // false = amount editable; true = amount locked to remaining
         });
         setExpandedIds(prev => { const s = new Set(prev); s.add(parentId); return s; });
     };
@@ -509,6 +510,7 @@ export default function Dashboard() {
             currentAmount: '',
             currentCategory: '',
             currentCamp: '',
+            isLastStep: true, // next step locks amount to remaining
         }));
     };
 
@@ -521,6 +523,7 @@ export default function Dashboard() {
             currentAmount: String(last.amount),
             currentCategory: last.category,
             currentCamp: last.camp,
+            isLastStep: false, // restored to editable
         }));
     };
 
@@ -1650,8 +1653,8 @@ export default function Dashboard() {
                                     const confirmedSum = wizard.confirmedParts.reduce((s, p) => s + p.amount, 0);
                                     const remaining = Math.round((wizard.parentAmount - confirmedSum) * 100) / 100;
                                     const stepNum = wizard.confirmedParts.length + 1;
-                                    const isFirstStep = wizard.confirmedParts.length === 0;
-                                    const canFinish = !isFirstStep; // need at least 1 "Dalej" before Gotowe
+                                    const isLastStep = wizard.isLastStep; // true = amount locked to remaining
+                                    const canFinish = wizard.confirmedParts.length >= 1 && isLastStep;
                                     const requiresCampW = (cat) => cat && cat.toLowerCase().includes('usługa turystyczna');
 
                                     return (
@@ -1725,20 +1728,20 @@ export default function Dashboard() {
                                                     )}
                                                 </td>
                                                 <td colSpan={2} style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                                    {!isFirstStep && (
+                                                    {wizard.confirmedParts.length > 0 && (
                                                         <button onClick={splitWizardBack}
                                                             style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#2B3674', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}
                                                         >← Wróć</button>
                                                     )}
-                                                    {/* "Dalej" always available on last step if it has editable amount */}
-                                                    {!canFinish && (
+                                                    {/* Amount editable → show "Dalej" */}
+                                                    {!isLastStep && (
                                                         <button onClick={splitWizardNext}
                                                             style={{ background: '#4318FF', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}
                                                         >Dalej →</button>
                                                     )}
-                                                    {/* "Podziel dalej" on last step: makes it editable for 3+ parts */}
-                                                    {canFinish && (
-                                                        <button onClick={() => setSplitWizard(prev => ({ ...prev, confirmedParts: [...prev.confirmedParts, { amount: remaining, category: prev.currentCategory, camp: prev.currentCamp }], currentAmount: '', currentCategory: '', currentCamp: '' }))}
+                                                    {/* Amount locked → "Podziel dalej" unlocks it for 3+ parts */}
+                                                    {isLastStep && (
+                                                        <button onClick={() => setSplitWizard(prev => ({ ...prev, isLastStep: false, currentAmount: '' }))}
                                                             style={{ background: 'none', border: '1px dashed #4318FF', borderRadius: '8px', color: '#4318FF', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}
                                                         >+ Podziel dalej</button>
                                                     )}
