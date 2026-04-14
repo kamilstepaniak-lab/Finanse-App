@@ -63,10 +63,10 @@ export default function Dashboard() {
     const [draft, setDraft] = useState({ searchTerm: '', dateFrom: '', dateTo: '', filterMonth: '', lastDays: '', filterCategory: '', filterCamp: '' });
     const [lastClickedIndex, setLastClickedIndex] = useState(null);
     const [expandedIds, setExpandedIds] = useState(new Set());
-    const [addingSubFor, setAddingSubFor] = useState(null);
-    const [newSub, setNewSub] = useState({ amount: '', category: '', camp: '', note: '' });
+    // Split wizard: null when closed, object when open
+    // { parentId, parentAmount, confirmedParts: [{amount,category,camp}], currentAmount, currentCategory, currentCamp }
+    const [splitWizard, setSplitWizard] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
-    const [subFormKey, setSubFormKey] = useState(0);
     // Pending edits: { [transactionId]: { category?: string, camp?: string } }
     const [pendingEdits, setPendingEdits] = useState({});
 
@@ -466,45 +466,116 @@ export default function Dashboard() {
         setExpandedIds(newSet);
     };
 
-    const handleAddSub = async (parentId) => {
+    // --- Split wizard handlers ---
+
+    const openSplitWizard = (parentId) => {
         const parent = transactions.find(t => t.id === parentId);
-        const amount = parseFloat(String(newSub.amount).replace(',', '.'));
-        if (!amount || isNaN(amount)) return alert('Podaj kwotę');
-        let createdSub = null;
-        try {
-            createdSub = await addTransaction({
-                parent_id: parentId,
-                date: parent.date,
-                amount,
-                original_amount: null,
-                currency: parent.currency || 'PLN',
-                sender: parent.sender,
-                title: parent.title,
-                category: newSub.category || parent.category || '',
-                camp: newSub.camp || '',
-                note: newSub.note || '',
-                needs_review: false,
-                source_file: 'manual',
-            });
-            await logActivity({
-                action: 'split_add',
-                transactionId: createdSub?.id || null,
-                snapshot: createdSub,
-                message: `Dodano podział: ${amount} ${parent.currency || 'PLN'} · ${newSub.category || parent.category || '—'}${newSub.camp ? ` · ${newSub.camp}` : ''}`,
-                details: { parent_id: parentId, parent_title: parent.title, parent_amount: parent.amount },
-            });
-        } catch (err) {
-            alert('Błąd zapisu podziału: ' + err.message + '\n\nSprawdź czy uruchomiłeś migrację add_parent_id.sql w Supabase SQL Editor.');
+        if (!parent) return;
+        setSplitWizard({
+            parentId,
+            parentAmount: Math.abs(parent.amount),
+            isNegative: parent.amount < 0,
+            confirmedParts: [],
+            currentAmount: '',
+            currentCategory: parent.category || '',
+            currentCamp: parent.camp || '',
+        });
+        setExpandedIds(prev => { const s = new Set(prev); s.add(parentId); return s; });
+    };
+
+    const splitWizardRemaining = splitWizard
+        ? splitWizard.parentAmount - splitWizard.confirmedParts.reduce((s, p) => s + p.amount, 0)
+        : 0;
+
+    const splitWizardNext = () => {
+        if (!splitWizard) return;
+        const amount = parseFloat(String(splitWizard.currentAmount).replace(',', '.'));
+        if (!amount || isNaN(amount) || amount <= 0) {
+            alert('Podaj kwotę dla tego podziału');
             return;
         }
-        // Keep form open for next sub-transaction, only clear amount and note
-        setNewSub(s => ({ ...s, amount: '', note: '' }));
-        setSubFormKey(k => k + 1); // force re-mount so autoFocus fires again
-        const newSet = new Set(expandedIds);
-        newSet.add(parentId);
-        setExpandedIds(newSet);
-        await loadTransactions();
+        if (amount >= splitWizardRemaining - 0.001) {
+            alert(`Kwota musi być mniejsza niż pozostałe ${splitWizardRemaining.toFixed(2)} PLN`);
+            return;
+        }
+        setSplitWizard(prev => ({
+            ...prev,
+            confirmedParts: [...prev.confirmedParts, {
+                amount,
+                category: prev.currentCategory,
+                camp: prev.currentCamp,
+            }],
+            currentAmount: '',
+            currentCategory: '',
+            currentCamp: '',
+        }));
     };
+
+    const splitWizardBack = () => {
+        if (!splitWizard || splitWizard.confirmedParts.length === 0) return;
+        const last = splitWizard.confirmedParts[splitWizard.confirmedParts.length - 1];
+        setSplitWizard(prev => ({
+            ...prev,
+            confirmedParts: prev.confirmedParts.slice(0, -1),
+            currentAmount: String(last.amount),
+            currentCategory: last.category,
+            currentCamp: last.camp,
+        }));
+    };
+
+    const splitWizardCommit = async () => {
+        if (!splitWizard) return;
+        const confirmedSum = splitWizard.confirmedParts.reduce((s, p) => s + p.amount, 0);
+        const remaining = Math.round((splitWizard.parentAmount - confirmedSum) * 100) / 100;
+        const sign = splitWizard.isNegative ? -1 : 1;
+
+        const allParts = [
+            ...splitWizard.confirmedParts,
+            { amount: remaining, category: splitWizard.currentCategory, camp: splitWizard.currentCamp },
+        ];
+
+        const parent = transactions.find(t => t.id === splitWizard.parentId);
+        if (!parent) return;
+
+        try {
+            // Delete any existing children first
+            const existingChildren = transactions.filter(t => t.parent_id === splitWizard.parentId);
+            for (const child of existingChildren) await deleteTransaction(child.id);
+
+            // Create all parts at once
+            for (const part of allParts) {
+                const created = await addTransaction({
+                    parent_id: splitWizard.parentId,
+                    date: parent.date,
+                    amount: sign * part.amount,
+                    original_amount: null,
+                    currency: parent.currency || 'PLN',
+                    sender: parent.sender,
+                    title: parent.title,
+                    category: part.category || '',
+                    camp: part.camp || '',
+                    note: '',
+                    needs_review: false,
+                    source_file: 'manual',
+                });
+                await logActivity({
+                    action: 'split_add',
+                    transactionId: created?.id || null,
+                    snapshot: created,
+                    message: `Podział: ${(sign * part.amount).toFixed(2)} ${parent.currency || 'PLN'} · ${part.category || '—'}${part.camp ? ` · ${part.camp}` : ''}`,
+                    details: { parent_id: splitWizard.parentId, parent_title: parent.title, parent_amount: parent.amount },
+                });
+            }
+
+            await updateTransaction(splitWizard.parentId, { needs_review: false });
+            setSplitWizard(null);
+            await loadTransactions();
+        } catch (err) {
+            alert('Błąd zapisu podziału: ' + err.message);
+        }
+    };
+
+    const splitWizardCancel = () => setSplitWizard(null);
 
     const handleDeleteSub = async (id) => {
         const snapshot = transactions.find(t => t.id === id);
@@ -834,6 +905,11 @@ export default function Dashboard() {
 
     // Set of IDs that are split parents — these should never show as needs_review
     const splitParentIds = new Set(Object.keys(childrenByParent));
+    // While the split form is open for a parent, treat it as a regular transaction
+    // so it stays visible in the current filter view and KPIs reflect the full parent amount.
+    const effectiveSplitParentIds = new Set(
+        [...splitParentIds].filter(id => id !== String(splitWizard?.parentId))
+    );
 
     // Shared predicate — applies all active filters to a single row (parent or child)
     const matchesAllFilters = (t) => {
@@ -879,7 +955,7 @@ export default function Dashboard() {
     const parentPassesFilters = (t) => {
         // For split parents: use only non-category/camp/review filters on the parent itself,
         // then require at least one child matching the category/camp/review filters.
-        if (splitParentIds.has(t.id)) {
+        if (effectiveSplitParentIds.has(t.id)) {
             const matchesSearch = t.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 t.sender?.toLowerCase().includes(searchTerm.toLowerCase());
             if (!matchesSearch) return false;
@@ -965,9 +1041,11 @@ export default function Dashboard() {
 
     // KPI stats — based on filtered transactions (respects all active filters)
     // Split parents are excluded from sums; their children are counted individually using the same filters.
-    const kpiParents = (filteredTransactions || []).filter(t => !splitParentIds.has(t.id));
-    // All children from split parents that match the active filters
-    const kpiChildren = Object.values(matchingChildrenByParent).flat();
+    const kpiParents = (filteredTransactions || []).filter(t => !effectiveSplitParentIds.has(t.id));
+    // All children from split parents that match the active filters (exclude in-progress split)
+    const kpiChildren = Object.entries(matchingChildrenByParent)
+        .filter(([pid]) => pid !== String(splitWizard?.parentId))
+        .flatMap(([, kids]) => kids);
     const kpiItems   = [...kpiParents, ...kpiChildren];
     const kpiIncome  = kpiItems.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
     const kpiExpense = kpiItems.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -1286,7 +1364,7 @@ export default function Dashboard() {
                             {displayedTransactions?.map((t, index) => {
                                 const children = childrenByParent[t.id] || [];
                                 const isExpanded = expandedIds.has(t.id);
-                                const isAddingHere = addingSubFor === t.id;
+                                const isAddingHere = splitWizard?.parentId === t.id;
                                 const allocatedSum = children.reduce((s, c) => s + (c.amount || 0), 0);
                                 const requiresCampSub = (cat) => cat && cat.toLowerCase().includes('usługa turystyczna');
                                 const hasNarrowingFilter = !!(filterCategory || filterCamp || filterReview);
@@ -1310,9 +1388,9 @@ export default function Dashboard() {
                                                 </button>
                                             )}
                                             <button
-                                                onClick={() => { setAddingSubFor(isAddingHere ? null : t.id); setNewSub({ amount: '', category: t.category || '', camp: t.camp || '', note: '' }); }}
+                                                onClick={() => isAddingHere ? splitWizardCancel() : openSplitWizard(t.id)}
                                                 style={{ background: 'none', border: '1px dashed #A3AED0', borderRadius: '50%', cursor: 'pointer', fontSize: '14px', color: isAddingHere ? '#EE5D50' : '#A3AED0', width: '20px', height: '20px', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                                                title={isAddingHere ? 'Anuluj podział' : 'Dodaj podział'}
+                                                title={isAddingHere ? 'Anuluj podział' : 'Podziel transakcję'}
                                             >{isAddingHere ? '×' : '+'}</button>
                                         </div>
                                     </td>
@@ -1565,84 +1643,117 @@ export default function Dashboard() {
                                     </tr>
                                 ))}
 
-                                {/* Add sub-transaction form — shown when "+" clicked or after expand if adding */}
-                                {(isAddingHere || (isExpanded && addingSubFor === t.id)) && (
-                                    <tr key={`sub-form-${t.id}-${subFormKey}`} className="add-sub-row">
-                                        <td colSpan={2}></td>
-                                        <td colSpan={2} style={{ color: '#4318FF', fontSize: '13px', fontWeight: 600 }}>
-                                            + Podział #{children.length + 1}
-                                            <span style={{ marginLeft: '10px', fontWeight: 400, color: '#A3AED0' }}>
-                                                {`przypisano ${allocatedSum.toFixed(2)} / ${t.amount?.toFixed(2)} PLN`}
-                                                {(t.amount - allocatedSum) > 0 &&
-                                                    <span style={{ color: '#EE5D50', marginLeft: '6px' }}>· pozostało {(t.amount - allocatedSum).toFixed(2)} PLN</span>
-                                                }
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <input
-                                                type="number"
-                                                placeholder="Kwota PLN"
-                                                value={newSub.amount}
-                                                onChange={e => setNewSub(s => ({ ...s, amount: e.target.value }))}
-                                                style={{ width: '100px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #ddd' }}
-                                                autoFocus
-                                                onKeyDown={e => e.key === 'Enter' && handleAddSub(t.id)}
-                                            />
-                                        </td>
-                                        <td>
-                                            <select
-                                                value={newSub.category}
-                                                onChange={e => setNewSub(s => ({ ...s, category: e.target.value }))}
-                                                className="category-select"
-                                            >
-                                                <option value="">-- Kategoria --</option>
-                                                {displayCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                                <option value="Koszt">Koszt</option>
-                                            </select>
-                                        </td>
-                                        <td>
-                                            {requiresCampSub(newSub.category) && (
-                                                <select
-                                                    value={newSub.camp}
-                                                    onChange={e => setNewSub(s => ({ ...s, camp: e.target.value }))}
-                                                    className="category-select"
-                                                    style={{ width: '120px' }}
-                                                >
-                                                    <option value="">- Wyjazd -</option>
-                                                    {activeCamps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                                </select>
-                                            )}
-                                        </td>
-                                        <td style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                            <button onClick={() => handleAddSub(t.id)} style={{ background: '#4318FF', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}>+ Dodaj</button>
-                                            <button onClick={() => {
-                                                setAddingSubFor(null);
-                                                // Clear needs_review on parent tylko jeśli wszystkie dzieci zatwierdzone
-                                                setTransactions(prev => {
-                                                    const children = prev.filter(tx => tx.parent_id === t.id);
-                                                    if (children.some(tx => tx.needs_review)) return prev;
-                                                    updateTransaction(t.id, { needs_review: false });
-                                                    return prev.map(tx => tx.id === t.id ? { ...tx, needs_review: false } : tx);
-                                                });
-                                            }} style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#2B3674', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}>Gotowe</button>
-                                        </td>
-                                    </tr>
-                                )}
+                                {/* Split wizard — shown when "+" clicked on this row */}
+                                {isAddingHere && splitWizard && (() => {
+                                    const wizard = splitWizard;
+                                    const confirmedSum = wizard.confirmedParts.reduce((s, p) => s + p.amount, 0);
+                                    const remaining = Math.round((wizard.parentAmount - confirmedSum) * 100) / 100;
+                                    const stepNum = wizard.confirmedParts.length + 1;
+                                    const isFirstStep = wizard.confirmedParts.length === 0;
+                                    const canFinish = !isFirstStep; // need at least 1 "Dalej" before Gotowe
+                                    const requiresCampW = (cat) => cat && cat.toLowerCase().includes('usługa turystyczna');
 
-                                {/* "Add another split" button when expanded but not currently adding */}
-                                {isExpanded && !isAddingHere && children.length > 0 && (
-                                    <tr className="add-sub-row">
-                                        <td colSpan={9} style={{ textAlign: 'left', padding: '6px 24px' }}>
-                                            <button
-                                                onClick={() => { setAddingSubFor(t.id); setNewSub({ amount: '', category: t.category || '', camp: t.camp || '', note: '' }); }}
-                                                style={{ background: 'none', border: '1px dashed #4318FF', borderRadius: '6px', color: '#4318FF', cursor: 'pointer', fontSize: '13px', padding: '3px 12px' }}
-                                            >+ Dodaj kolejny podział</button>
-                                            <span style={{ marginLeft: '16px', fontSize: '13px', color: '#A3AED0' }}>
-                                                Przypisano: {allocatedSum.toFixed(2)} PLN / {t.amount?.toFixed(2)} PLN
-                                            </span>
-                                        </td>
-                                    </tr>
-                                )}
+                                    return (
+                                        <>
+                                            {/* Confirmed parts (locked, read-only) */}
+                                            {wizard.confirmedParts.map((part, pi) => (
+                                                <tr key={`wizard-confirmed-${pi}`} className="add-sub-row">
+                                                    <td colSpan={2}></td>
+                                                    <td colSpan={2} style={{ color: '#05CD99', fontSize: '13px', fontWeight: 600 }}>
+                                                        ✓ Część {pi + 1}
+                                                    </td>
+                                                    <td style={{ fontSize: '13px', color: '#2B3674', fontWeight: 700 }}>
+                                                        {part.amount.toFixed(2)} PLN
+                                                    </td>
+                                                    <td style={{ fontSize: '13px', color: '#2B3674' }}>{part.category || '—'}</td>
+                                                    <td style={{ fontSize: '13px', color: '#2B3674' }}>{part.camp || '—'}</td>
+                                                    <td colSpan={2}></td>
+                                                </tr>
+                                            ))}
+
+                                            {/* Current step form */}
+                                            <tr className="add-sub-row">
+                                                <td colSpan={2}></td>
+                                                <td colSpan={2} style={{ color: '#4318FF', fontSize: '13px', fontWeight: 600 }}>
+                                                    {canFinish
+                                                        ? <span>Część {stepNum} <span style={{ fontWeight: 400, color: '#A3AED0', fontSize: '12px' }}>· kwota: <strong style={{ color: '#2B3674' }}>{remaining.toFixed(2)} PLN</strong> (auto)</span></span>
+                                                        : <span>Część {stepNum} <span style={{ fontWeight: 400, color: '#A3AED0', fontSize: '12px' }}>· podaj kwotę tej części</span></span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    {canFinish ? (
+                                                        /* Last part: amount locked to exact remaining */
+                                                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#2B3674', padding: '4px 10px', background: '#F0FFF4', border: '1px solid #05CD99', borderRadius: '6px', display: 'inline-block', minWidth: '90px' }}>
+                                                            {remaining.toFixed(2)} PLN
+                                                        </span>
+                                                    ) : (
+                                                        /* First+ parts: editable */
+                                                        <input
+                                                            type="number"
+                                                            placeholder={`max ${remaining.toFixed(2)}`}
+                                                            value={wizard.currentAmount}
+                                                            onChange={e => setSplitWizard(prev => ({ ...prev, currentAmount: e.target.value }))}
+                                                            style={{ width: '110px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #4318FF' }}
+                                                            autoFocus
+                                                            onKeyDown={e => e.key === 'Enter' && splitWizardNext()}
+                                                        />
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    <select
+                                                        value={wizard.currentCategory}
+                                                        onChange={e => setSplitWizard(prev => ({ ...prev, currentCategory: e.target.value, currentCamp: '' }))}
+                                                        className="category-select"
+                                                    >
+                                                        <option value="">-- Kategoria --</option>
+                                                        {displayCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                        <option value="Koszt">Koszt</option>
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    {requiresCampW(wizard.currentCategory) && (
+                                                        <select
+                                                            value={wizard.currentCamp}
+                                                            onChange={e => setSplitWizard(prev => ({ ...prev, currentCamp: e.target.value }))}
+                                                            className="category-select"
+                                                            style={{ width: '120px' }}
+                                                        >
+                                                            <option value="">- Wyjazd -</option>
+                                                            {activeCamps?.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                                        </select>
+                                                    )}
+                                                </td>
+                                                <td colSpan={2} style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                    {!isFirstStep && (
+                                                        <button onClick={splitWizardBack}
+                                                            style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#2B3674', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}
+                                                        >← Wróć</button>
+                                                    )}
+                                                    {/* "Dalej" always available on last step if it has editable amount */}
+                                                    {!canFinish && (
+                                                        <button onClick={splitWizardNext}
+                                                            style={{ background: '#4318FF', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}
+                                                        >Dalej →</button>
+                                                    )}
+                                                    {/* "Podziel dalej" on last step: makes it editable for 3+ parts */}
+                                                    {canFinish && (
+                                                        <button onClick={() => setSplitWizard(prev => ({ ...prev, confirmedParts: [...prev.confirmedParts, { amount: remaining, category: prev.currentCategory, camp: prev.currentCamp }], currentAmount: '', currentCategory: '', currentCamp: '' }))}
+                                                            style={{ background: 'none', border: '1px dashed #4318FF', borderRadius: '8px', color: '#4318FF', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}
+                                                        >+ Podziel dalej</button>
+                                                    )}
+                                                    {canFinish && (
+                                                        <button onClick={splitWizardCommit}
+                                                            style={{ background: '#05CD99', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}
+                                                        >✓ Gotowe</button>
+                                                    )}
+                                                    <button onClick={splitWizardCancel}
+                                                        style={{ background: 'none', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#A3AED0', cursor: 'pointer', fontSize: '12px', padding: '4px 8px' }}
+                                                    >Anuluj</button>
+                                                </td>
+                                            </tr>
+                                        </>
+                                    );
+                                })()}
 
                             </React.Fragment>
                                 );

@@ -23,7 +23,7 @@ function buildPrompt(batch, categories, camps) {
         : '(brak wyjazdów)';
 
     const txList = batch.map((t, i) =>
-        `${i + 1}. id="${t.id}" | data=${t.date} | kwota=${t.amount} PLN | nadawca="${t.sender || ''}" | tytuł="${t.title || ''}"`
+        `${i + 1}. id="${t.id}" | data=${t.date} | kwota=${t.amount} PLN | kierunek=${t.amount > 0 ? 'WPŁYW (dodatni)' : 'WYDATEK (ujemny)'} | nadawca="${t.sender || ''}" | tytuł="${t.title || ''}"`
     ).join('\n');
 
     return `Jesteś asystentem księgowości polskiej firmy turystyczno-sportowej (obozy pływackie, narciarskie, letnie). Przeanalizuj poniższe transakcje bankowe i przypisz każdej:
@@ -41,7 +41,8 @@ TRANSAKCJE:
 ${txList}
 
 Zasady kategoryzacji:
-- Kwota ujemna → zawsze kategoria "Koszt", camp: null
+- Kwota ujemna (WYDATEK) → zawsze kategoria "Koszt", camp: null
+- Kwota dodatnia (WPŁYW) → NIGDY kategoria "Koszt" — to jest przychód firmy, nawet jeśli tytuł zawiera słowo "sprzedaż", "wymiana walut" itp.
 - Wpłata za obóz/wyjazd → "usługa turystyczna" + dopasuj wyjazd po nazwie lokalizacji, roku, sezonie
 - Lekcje pływania, basen, treningi → "nauka pływania", camp: null
 - Szkolenia bez lokalizacji obozu → "Szkolenie", camp: null
@@ -123,8 +124,16 @@ export default async function handler(req, res) {
         if (!jsonMatch) throw new Error(`Batch ${idx + 1}: no JSON array in response`);
         const parsed = JSON.parse(jsonMatch[0]);
 
-        return parsed.map(item => {
-            const resolvedCategory = resolveCategory(item.category);
+        return parsed.map((item, i) => {
+            const tx = batch[i];
+            let resolvedCategory = resolveCategory(item.category);
+
+            // Guard: positive amount (income) can never be "Koszt" — override AI mistake
+            if (tx && tx.amount > 0 && resolvedCategory === 'Koszt') {
+                console.warn(`Category override: id="${item.id}" amount=${tx.amount} > 0 but AI returned "Koszt" — clearing to needsReview`);
+                resolvedCategory = null;
+            }
+
             // Camp only makes sense for tourist services — enforce null for everything else
             const campAllowed = resolvedCategory && resolvedCategory.toLowerCase().includes('turystyczna');
             const resolvedCamp = campAllowed ? resolveCamp(item.camp) : null;
@@ -137,7 +146,7 @@ export default async function handler(req, res) {
                 id: item.id,
                 category: resolvedCategory,
                 camp: resolvedCamp,
-                needsReview: item.needsReview !== false && item.needsReview !== 'false',
+                needsReview: !resolvedCategory ? true : (item.needsReview !== false && item.needsReview !== 'false'),
             };
         });
     }));
