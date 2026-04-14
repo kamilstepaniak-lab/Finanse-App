@@ -45,7 +45,6 @@ Zasady kategoryzacji:
 - Wpłata za obóz/wyjazd → "usługa turystyczna" + dopasuj wyjazd po nazwie lokalizacji, roku, sezonie
 - Lekcje pływania, basen, treningi → "nauka pływania", camp: null
 - Szkolenia bez lokalizacji obozu → "Szkolenie", camp: null
-- Zwrot pieniędzy → "Zwrot", camp: null
 - Faktury, zakupy → odpowiednia kategoria, camp: null
 
 Dopasowanie wyjazdu — kluczowe:
@@ -125,9 +124,13 @@ export default async function handler(req, res) {
         const parsed = JSON.parse(jsonMatch[0]);
 
         return parsed.map(item => {
-            const resolvedCamp = resolveCamp(item.camp);
             const resolvedCategory = resolveCategory(item.category);
-            if (item.camp && !resolvedCamp) {
+            // Camp only makes sense for tourist services — enforce null for everything else
+            const campAllowed = resolvedCategory && resolvedCategory.toLowerCase().includes('turystyczna');
+            const resolvedCamp = campAllowed ? resolveCamp(item.camp) : null;
+            if (item.camp && !campAllowed) {
+                console.warn(`Camp cleared: category="${resolvedCategory}" does not allow camp assignment`);
+            } else if (item.camp && !resolvedCamp) {
                 console.warn(`Camp not resolved: Claude="${item.camp}" normKey="${normStr(item.camp)}"`);
             }
             return {

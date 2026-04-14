@@ -93,12 +93,10 @@ export default function Reports() {
             return true;
         }).sort((a, b) => a.date.localeCompare(b.date));
 
-        // Basic Stats — Zwrot excluded from income (shown separately)
-        const income = filtered.filter(t => t.amount > 0 && t.category !== 'Zwrot').reduce((acc, t) => acc + t.amount, 0);
+        const income = filtered.filter(t => t.amount > 0).reduce((acc, t) => acc + t.amount, 0);
         const expense = filtered.filter(t => t.amount < 0).reduce((acc, t) => acc + Math.abs(t.amount), 0);
-        const zwrot = filtered.filter(t => t.amount > 0 && t.category === 'Zwrot').reduce((acc, t) => acc + t.amount, 0);
 
-        const incomeEUR = filtered.filter(t => t.amount > 0 && t.category !== 'Zwrot' && t.currency === 'EUR')
+        const incomeEUR = filtered.filter(t => t.amount > 0 && t.currency === 'EUR')
             .reduce((acc, t) => acc + (t.original_amount || 0), 0);
         const expenseEUR = filtered.filter(t => t.amount < 0 && t.currency === 'EUR')
             .reduce((acc, t) => acc + Math.abs(t.original_amount || 0), 0);
@@ -115,7 +113,7 @@ export default function Reports() {
             if (!t.date) return;
             const month = t.date.slice(0, 7);
             if (!monthlyMap[month]) monthlyMap[month] = { month, income: 0, expense: 0 };
-            if (t.amount > 0 && t.category !== 'Zwrot') monthlyMap[month].income += t.amount;
+            if (t.amount > 0) monthlyMap[month].income += t.amount;
             else if (t.amount < 0) monthlyMap[month].expense += Math.abs(t.amount);
         });
         const monthlyData = Object.values(monthlyMap).sort((a, b) => a.month.localeCompare(b.month));
@@ -167,14 +165,14 @@ export default function Reports() {
             const monday = new Date(d.setDate(diff));
             const weekKey = monday.toISOString().slice(0, 10);
             if (!weeklyMap[weekKey]) weeklyMap[weekKey] = { week: weekKey, income: 0, expense: 0 };
-            if (t.amount > 0 && t.category !== 'Zwrot') weeklyMap[weekKey].income += t.amount;
+            if (t.amount > 0) weeklyMap[weekKey].income += t.amount;
             else if (t.amount < 0) weeklyMap[weekKey].expense += Math.abs(t.amount);
         });
         const weeklyData = Object.values(weeklyMap).sort((a, b) => a.week.localeCompare(b.week));
 
         // Top contractors (income by sender)
         const senderMap = {};
-        filtered.filter(t => t.amount > 0 && t.category !== 'Zwrot').forEach(t => {
+        filtered.filter(t => t.amount > 0).forEach(t => {
             const s = t.sender || 'Nieznany';
             if (!senderMap[s]) senderMap[s] = { name: s, total: 0, count: 0 };
             senderMap[s].total += t.amount;
@@ -183,11 +181,19 @@ export default function Reports() {
         const topContractors = Object.values(senderMap).sort((a, b) => b.total - a.total).slice(0, 20);
 
         // Camp profitability (income - expense per camp)
+        // Costs without a camp → "Koszty ogólne", unmatched income → "Bez wyjazdu"
         const campProfitMap = {};
         filtered.forEach(t => {
-            const campName = t.camp || 'Bez wyjazdu';
+            let campName;
+            if (t.camp) {
+                campName = t.camp;
+            } else if (t.amount < 0) {
+                campName = 'Koszty ogólne';
+            } else {
+                campName = 'Bez wyjazdu';
+            }
             if (!campProfitMap[campName]) campProfitMap[campName] = { name: campName, income: 0, expense: 0 };
-            if (t.amount > 0 && t.category !== 'Zwrot') campProfitMap[campName].income += t.amount;
+            if (t.amount > 0) campProfitMap[campName].income += t.amount;
             else if (t.amount < 0) campProfitMap[campName].expense += Math.abs(t.amount);
         });
         const campProfitability = Object.values(campProfitMap)
@@ -211,13 +217,13 @@ export default function Reports() {
                 if (t.date < pf || t.date > pt) return false;
                 return true;
             });
-            const prevIncome = prevFiltered.filter(t => t.amount > 0 && t.category !== 'Zwrot').reduce((s, t) => s + t.amount, 0);
+            const prevIncome = prevFiltered.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
             const prevExpense = prevFiltered.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-            prevStats = { income: prevIncome, expense: prevExpense, balance: prevIncome - prevExpense, dateFrom: pf, dateTo: pt };
+            prevStats = { income: prevIncome, expense: prevExpense, dateFrom: pf, dateTo: pt };
         }
 
         return {
-            stats: { income, expense, balance: income - expense, incomeEUR, expenseEUR, zwrot },
+            stats: { income, expense, incomeEUR, expenseEUR },
             incomeByCategoryData,
             incomeByCampData,
             monthlyData,
@@ -236,8 +242,6 @@ export default function Reports() {
             ['Sekcja', 'Nazwa', 'Kwota PLN', 'Szczegóły'],
             ['KPI', 'Przychody', reportData.stats.income.toFixed(2), `EUR: ${reportData.stats.incomeEUR.toFixed(2)}`],
             ['KPI', 'Wydatki', reportData.stats.expense.toFixed(2), `EUR: ${reportData.stats.expenseEUR.toFixed(2)}`],
-            ['KPI', 'Bilans', reportData.stats.balance.toFixed(2), ''],
-            ['KPI', 'Zwroty', (reportData.stats.zwrot || 0).toFixed(2), ''],
             [],
             ['Kategoria', 'Przychód PLN'],
             ...reportData.incomeByCategoryData.map(c => [c.name, c.value.toFixed(2)]),
@@ -382,9 +386,6 @@ export default function Reports() {
                         <span>Przychody</span>
                         <h3>{reportData.stats.income.toLocaleString()} PLN</h3>
                         <small>{reportData.stats.incomeEUR.toLocaleString()} EUR</small>
-                        {reportData.stats.zwrot > 0 && (
-                            <small style={{ color: '#7C3AED', fontWeight: 600 }}>zwroty: {reportData.stats.zwrot.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</small>
-                        )}
                         {reportData.prevStats && <ComparisonBadge current={reportData.stats.income} previous={reportData.prevStats.income} />}
                     </div>
                 </div>
@@ -395,20 +396,6 @@ export default function Reports() {
                         <h3>{reportData.stats.expense.toLocaleString()} PLN</h3>
                         <small>{reportData.stats.expenseEUR.toLocaleString()} EUR</small>
                         {reportData.prevStats && <ComparisonBadge current={reportData.stats.expense} previous={reportData.prevStats.expense} inverse />}
-                    </div>
-                </div>
-                <div className="kpi-card balance">
-                    <div className="kpi-icon">⚖</div>
-                    <div className="kpi-content">
-                        <span>Bilans</span>
-                        <h3 className={reportData.stats.balance >= 0 ? 'pos' : 'neg'}>
-                            {reportData.stats.balance.toLocaleString()} PLN
-                        </h3>
-                        {reportData.prevStats ? (
-                            <ComparisonBadge current={reportData.stats.balance} previous={reportData.prevStats.balance} />
-                        ) : (
-                            <small>Wynik operacyjny</small>
-                        )}
                     </div>
                 </div>
             </section>
