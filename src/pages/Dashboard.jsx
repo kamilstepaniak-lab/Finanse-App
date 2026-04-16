@@ -1185,7 +1185,7 @@ export default function Dashboard() {
                     </div>
                     <button
                         className={`review-btn ${filterReview === 'uncertain' ? 'active' : ''}`}
-                        onClick={() => setFilterReview(v => v === 'uncertain' ? '' : 'uncertain')}
+                        onClick={() => { setFilterReview(v => v === 'uncertain' ? '' : 'uncertain'); setFilterSplit(false); }}
                         title="Pokaż transakcje z sugerowanym obozem (do potwierdzenia)"
                         style={{ borderColor: '#F59E0B', color: filterReview === 'uncertain' ? '#fff' : '#92400E', background: filterReview === 'uncertain' ? '#F59E0B' : 'transparent' }}
                     >
@@ -1194,7 +1194,7 @@ export default function Dashboard() {
                     </button>
                     <button
                         className={`review-btn ${filterReview === 'missing' ? 'active' : ''}`}
-                        onClick={() => setFilterReview(v => v === 'missing' ? '' : 'missing')}
+                        onClick={() => { setFilterReview(v => v === 'missing' ? '' : 'missing'); setFilterSplit(false); }}
                         title="Pokaż transakcje bez przypisanego obozu"
                         style={{ borderColor: '#EE5D50', color: filterReview === 'missing' ? '#fff' : '#991B1B', background: filterReview === 'missing' ? '#EE5D50' : 'transparent' }}
                     >
@@ -1204,7 +1204,7 @@ export default function Dashboard() {
                     {allKpiNoCategory > 0 && (
                         <button
                             className={`review-btn ${filterReview === 'no_category' ? 'active' : ''}`}
-                            onClick={() => setFilterReview(v => v === 'no_category' ? '' : 'no_category')}
+                            onClick={() => { setFilterReview(v => v === 'no_category' ? '' : 'no_category'); setFilterSplit(false); }}
                             title="Pokaż transakcje bez przypisanej kategorii"
                             style={{ borderColor: '#7C3AED', color: filterReview === 'no_category' ? '#fff' : '#5B21B6', background: filterReview === 'no_category' ? '#7C3AED' : 'transparent' }}
                         >
@@ -1215,7 +1215,7 @@ export default function Dashboard() {
                     {splitParentIds.size > 0 && (
                         <button
                             className={`review-btn ${filterSplit ? 'active' : ''}`}
-                            onClick={() => setFilterSplit(v => !v)}
+                            onClick={() => { setFilterSplit(v => !v); setFilterReview(''); }}
                             title="Pokaż tylko transakcje podzielone przez administratora"
                             style={{ borderColor: '#0EA5E9', color: filterSplit ? '#fff' : '#0369A1', background: filterSplit ? '#0EA5E9' : 'transparent' }}
                         >
