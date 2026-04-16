@@ -114,6 +114,16 @@ button:active {
   transform: scale(0.97);
 }
 
+/* Keyboard accessibility — mouse users keep a clean look via :focus-visible */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .btn-primary {
   background: var(--color-primary);
   color: #fff;
@@ -171,6 +181,42 @@ button:active {
 .btn-ghost:hover {
   background: var(--bg-primary);
   color: var(--color-text-main);
+}
+
+/* ─── Sort / Filter toggle buttons (shared across Reports, Camps, etc.) ─── */
+.sort-controls {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1.5px solid #E2EAFF;
+  background: var(--bg-white);
+  color: #64748B;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.sort-btn:hover {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.sort-btn.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(21, 112, 239, 0.25);
 }
 
 /* ─── Status Pills ─── */

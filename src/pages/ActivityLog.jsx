@@ -48,15 +48,15 @@ const formatValue = (v) => {
 function ChangesDiff({ changes }) {
     if (!changes || typeof changes !== 'object') return null;
     const entries = Object.entries(changes).filter(([k]) => k !== 'needs_review');
-    if (entries.length === 0) return <span style={{ color: '#A3AED0', fontSize: '12px' }}>—</span>;
+    if (entries.length === 0) return <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>—</span>;
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
             {entries.map(([field, diff]) => (
                 <div key={field} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <strong style={{ color: '#2B3674', minWidth: '80px' }}>{FIELD_LABELS[field] || field}:</strong>
-                    <span style={{ textDecoration: 'line-through', color: '#EE5D50' }}>{formatValue(diff?.from)}</span>
-                    <span style={{ color: '#A3AED0' }}>→</span>
-                    <span style={{ color: '#05CD99', fontWeight: 600 }}>{formatValue(diff?.to)}</span>
+                    <strong style={{ color: 'var(--color-text-main)', minWidth: '80px' }}>{FIELD_LABELS[field] || field}:</strong>
+                    <span style={{ textDecoration: 'line-through', color: 'var(--color-error)' }}>{formatValue(diff?.from)}</span>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
+                    <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>{formatValue(diff?.to)}</span>
                 </div>
             ))}
         </div>
@@ -64,7 +64,7 @@ function ChangesDiff({ changes }) {
 }
 
 function SnapshotSummary({ snap }) {
-    if (!snap) return <span style={{ color: '#A3AED0', fontSize: '12px' }}>—</span>;
+    if (!snap) return <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>—</span>;
     return (
         <div style={{ fontSize: '12px', color: '#4A5568', display: 'flex', flexDirection: 'column', gap: '2px' }}>
             <div><strong>{snap.title || '(bez tytułu)'}</strong> · {snap.date}</div>
@@ -122,7 +122,7 @@ export default function ActivityLog() {
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                     <h3 style={{ margin: 0 }}>Historia zmian</h3>
-                    <span style={{ fontSize: '13px', color: '#A3AED0' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
                         {count.toLocaleString('pl-PL')} wpisów · strona {page + 1}/{totalPages}
                     </span>
                 </div>
@@ -138,7 +138,7 @@ export default function ActivityLog() {
             {/* Filters */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', padding: '12px 20px', borderBottom: '1px solid #E2E8F0', alignItems: 'flex-end' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', color: '#A3AED0', fontWeight: 600 }}>Typ akcji</label>
+                    <label style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Typ akcji</label>
                     <select value={filterAction} onChange={e => setFilterAction(e.target.value)} className="filter-select">
                         <option value="">Wszystkie</option>
                         {Object.entries(ACTION_META).map(([key, meta]) => (
@@ -147,15 +147,15 @@ export default function ActivityLog() {
                     </select>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', color: '#A3AED0', fontWeight: 600 }}>Od</label>
+                    <label style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Od</label>
                     <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="filter-select" />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', color: '#A3AED0', fontWeight: 600 }}>Do</label>
+                    <label style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Do</label>
                     <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="filter-select" />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '200px' }}>
-                    <label style={{ fontSize: '11px', color: '#A3AED0', fontWeight: 600 }}>Szukaj w opisie</label>
+                    <label style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Szukaj w opisie</label>
                     <input
                         type="text"
                         value={search}
@@ -264,25 +264,25 @@ export default function ActivityLog() {
                         <button
                             onClick={() => setPage(0)}
                             disabled={page === 0}
-                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page === 0 ? '#F4F7FE' : '#fff', cursor: page === 0 ? 'default' : 'pointer', color: page === 0 ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page === 0 ? '#F4F7FE' : '#fff', cursor: page === 0 ? 'default' : 'pointer', color: page === 0 ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                         >«</button>
                         <button
                             onClick={() => setPage(p => Math.max(0, p - 1))}
                             disabled={page === 0}
-                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page === 0 ? '#F4F7FE' : '#fff', cursor: page === 0 ? 'default' : 'pointer', color: page === 0 ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page === 0 ? '#F4F7FE' : '#fff', cursor: page === 0 ? 'default' : 'pointer', color: page === 0 ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                         >‹</button>
-                        <span style={{ fontSize: '13px', color: '#2B3674', fontWeight: 600, padding: '0 12px' }}>
+                        <span style={{ fontSize: '13px', color: 'var(--color-text-main)', fontWeight: 600, padding: '0 12px' }}>
                             {page + 1} / {totalPages}
                         </span>
                         <button
                             onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
                             disabled={page >= totalPages - 1}
-                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page >= totalPages - 1 ? '#F4F7FE' : '#fff', cursor: page >= totalPages - 1 ? 'default' : 'pointer', color: page >= totalPages - 1 ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page >= totalPages - 1 ? '#F4F7FE' : '#fff', cursor: page >= totalPages - 1 ? 'default' : 'pointer', color: page >= totalPages - 1 ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                         >›</button>
                         <button
                             onClick={() => setPage(totalPages - 1)}
                             disabled={page >= totalPages - 1}
-                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page >= totalPages - 1 ? '#F4F7FE' : '#fff', cursor: page >= totalPages - 1 ? 'default' : 'pointer', color: page >= totalPages - 1 ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: page >= totalPages - 1 ? '#F4F7FE' : '#fff', cursor: page >= totalPages - 1 ? 'default' : 'pointer', color: page >= totalPages - 1 ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                         >»</button>
                     </div>
                 )}

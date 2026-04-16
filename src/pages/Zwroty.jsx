@@ -28,13 +28,13 @@ export default function Zwroty() {
     const total = transactions.reduce((s, t) => s + (t.amount || 0), 0);
     const fmt = (n) => n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    if (loading) return <div style={{ padding: '40px', textAlign: 'center' }}>Ładowanie...</div>;
+    if (loading) return <div className="empty-state">Ładowanie...</div>;
 
     return (
         <div className="card table-card">
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3>Zwroty</h3>
-                <span style={{ fontSize: '15px', fontWeight: 700, color: '#7C3AED' }}>
+                <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-primary)' }}>
                     Łącznie: {fmt(total)} PLN
                 </span>
             </div>

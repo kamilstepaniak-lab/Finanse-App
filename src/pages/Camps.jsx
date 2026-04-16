@@ -81,21 +81,31 @@ export default function Camps() {
             return;
         }
         if (!window.confirm(`Zaktualizować ${toProcess.length} grup transakcji? Tej operacji nie można cofnąć.`)) return;
-        try {
-            for (const orphan of orphanedCamps) {
-                if (orphan.reassignTo === '__clear__') {
-                    await renameCampInTransactions(orphan.oldName, '');
-                } else if (orphan.reassignTo) {
-                    await renameCampInTransactions(orphan.oldName, orphan.reassignTo);
-                }
+
+        // Process each rename independently, tracking successes and failures.
+        // On error we keep the unresolved entries in the panel so the user can retry them.
+        const failures = [];
+        const succeeded = new Set();
+        for (const orphan of toProcess) {
+            try {
+                const newName = orphan.reassignTo === '__clear__' ? '' : orphan.reassignTo;
+                await renameCampInTransactions(orphan.oldName, newName);
+                succeeded.add(orphan.oldName);
+            } catch (err) {
+                console.error(`Błąd renameCampInTransactions("${orphan.oldName}"):`, err);
+                failures.push({ name: orphan.oldName, message: err.message });
             }
-            setOrphanedCamps([]);
-            setShowOrphanPanel(false);
-        } catch (err) {
-            console.error('Błąd naprawy osieroconych wyjazdów:', err);
-            alert('Błąd podczas naprawy: ' + err.message + '\nCzęść zmian mogła zostać zapisana. Sprawdź dane.');
-            loadCamps(false);
         }
+
+        // Keep in the panel only orphans that either failed OR were not selected for processing
+        setOrphanedCamps(prev => prev.filter(o => !succeeded.has(o.oldName)));
+        if (failures.length === 0) {
+            setShowOrphanPanel(false);
+        } else {
+            const lines = failures.map(f => `• ${f.name}: ${f.message}`).join('\n');
+            alert(`Naprawiono ${succeeded.size} z ${toProcess.length}. Błędy:\n${lines}`);
+        }
+        loadCamps(false);
     };
 
     const handleAddCamp = async () => {
@@ -292,17 +302,17 @@ export default function Camps() {
         <div className="card">
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                 <h3>Zarządzanie Wyjazdami</h3>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="sort-controls">
                     <button
+                        className="sort-btn"
                         onClick={handleRegenerateAllTags}
                         title="Przelicz tagi dla wszystkich obozów — zastąp stare concatenated tagi indywidualnymi słowami"
-                        style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #e0e5f2', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#2b3674', fontWeight: 600 }}
                     >
                         Przelicz tagi
                     </button>
                     <button
+                        className={`sort-btn${sortOrder === 'asc' ? ' active' : ''}`}
                         onClick={() => setSortOrder(sortOrder === 'asc' ? 'none' : 'asc')}
-                        style={{ padding: '6px 12px', background: sortOrder === 'asc' ? '#e0e5f2' : 'transparent', border: '1px solid #e0e5f2', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', color: '#2b3674', fontWeight: 600 }}
                     >
                         {sortOrder === 'asc' ? 'Zresetuj sortowanie' : 'Sortuj A-Z'}
                     </button>
@@ -378,7 +388,7 @@ export default function Camps() {
                             style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #ddd', width: '90px', fontSize: '14px' }}
                         />
                         <div style={{ display: 'flex', gap: '6px' }}>
-                            {[['lato','☀️ Lato','#FEF3C7','#B45309'],['zima','❄️ Zima','#EFF6FF','#1570EF']].map(([val, label, bg, color]) => (
+                            {[['lato','☀️ Lato','#FEF3C7','#B45309'],['zima','❄️ Zima','var(--color-primary-light)','var(--color-primary)']].map(([val, label, bg, color]) => (
                                 <button
                                     key={val}
                                     onClick={() => setNewCampSeason(s => s === val ? '' : val)}
@@ -400,7 +410,7 @@ export default function Camps() {
                 {/* Completed filter */}
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748B' }}>Status:</span>
-                    {[['active','Aktywne','#05CD99'],['completed','Zakończone','#94A3B8'],['','Wszystkie','#4318FF']].map(([val, label, color]) => (
+                    {[['active','Aktywne','var(--color-success)'],['completed','Zakończone','#94A3B8'],['','Wszystkie','#4318FF']].map(([val, label, color]) => (
                         <button
                             key={val}
                             onClick={() => setFilterCompleted(val)}
@@ -416,7 +426,7 @@ export default function Camps() {
 
                 {/* Season + Year filter */}
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    {[['','Wszystkie','#4318FF'],['lato','☀️ Letnie','#B45309'],['zima','❄️ Zimowe','#1570EF']].map(([val, label, color]) => (
+                    {[['','Wszystkie','#4318FF'],['lato','☀️ Letnie','#B45309'],['zima','❄️ Zimowe','var(--color-primary)']].map(([val, label, color]) => (
                         <button
                             key={val}
                             onClick={() => setFilterSeason(val)}
@@ -469,7 +479,7 @@ export default function Camps() {
                             const isEditing = editingId === camp.id;
 
                             return (
-                                <tr key={camp.id} style={{ borderBottom: '1px solid #F0F4FF', opacity: camp.is_completed ? 0.55 : 1 }}>
+                                <tr key={camp.id} style={{ borderBottom: '1px solid var(--bg-primary)', opacity: camp.is_completed ? 0.55 : 1 }}>
                                     {/* Title */}
                                     <td style={tdStyle}>
                                         {isEditing ? (
@@ -514,7 +524,7 @@ export default function Camps() {
                                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                                         {isEditing ? (
                                             <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                                                {[['lato','☀️','#B45309','#FEF3C7'],['zima','❄️','#1570EF','#EFF6FF']].map(([val, icon, color, bg]) => (
+                                                {[['lato','☀️','#B45309','#FEF3C7'],['zima','❄️','var(--color-primary)','var(--color-primary-light)']].map(([val, icon, color, bg]) => (
                                                     <button key={val} onClick={() => setEditSeason(s => s === val ? '' : val)}
                                                         style={{ padding: '4px 8px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', border: `2px solid ${editSeason === val ? color : '#ddd'}`, background: editSeason === val ? bg : '#fff', color: editSeason === val ? color : '#94A3B8' }}
                                                     >{icon}</button>
@@ -530,7 +540,7 @@ export default function Camps() {
                                                 <button
                                                     onClick={() => handleSeasonChange(camp, 'zima')}
                                                     title="Oznacz jako zimowy"
-                                                    style={{ fontSize: '11px', fontWeight: 700, borderRadius: '6px', padding: '3px 7px', cursor: 'pointer', border: `1px solid ${camp.season === 'zima' ? '#93C5FD' : '#E2E8F0'}`, background: camp.season === 'zima' ? '#EFF6FF' : '#fff', color: camp.season === 'zima' ? '#1570EF' : '#CBD5E1' }}
+                                                    style={{ fontSize: '11px', fontWeight: 700, borderRadius: '6px', padding: '3px 7px', cursor: 'pointer', border: `1px solid ${camp.season === 'zima' ? '#93C5FD' : '#E2E8F0'}`, background: camp.season === 'zima' ? 'var(--color-primary-light)' : '#fff', color: camp.season === 'zima' ? 'var(--color-primary)' : '#CBD5E1' }}
                                                 >❄️</button>
                                             </div>
                                         )}
@@ -555,8 +565,8 @@ export default function Camps() {
                                             {manualTags.map(tag => (
                                                 <span key={tag} style={{
                                                     display: 'inline-flex', alignItems: 'center', gap: '3px',
-                                                    background: '#EFF6FF', border: '1px solid #BFDBFE',
-                                                    color: '#1570EF', borderRadius: '6px',
+                                                    background: 'var(--color-primary-light)', border: '1px solid #BFDBFE',
+                                                    color: 'var(--color-primary)', borderRadius: '6px',
                                                     padding: '2px 7px', fontSize: '11px', fontWeight: 600
                                                 }}>
                                                     {tag}
@@ -580,7 +590,7 @@ export default function Camps() {
                                                     onBlur={() => { setAddingTagFor(null); setNewTagInput(''); }}
                                                     placeholder="np. gniewino"
                                                     style={{
-                                                        border: '1px solid #1570EF', borderRadius: '6px',
+                                                        border: '1px solid var(--color-primary)', borderRadius: '6px',
                                                         padding: '2px 8px', fontSize: '11px', outline: 'none',
                                                         width: '110px', color: '#0D1B3E'
                                                     }}
@@ -603,10 +613,10 @@ export default function Camps() {
                                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
                                             {isEditing ? (
                                                 <>
-                                                    <button onClick={() => handleSaveEdit(camp.id, camp.name)} style={{ background: 'none', color: '#05CD99', cursor: 'pointer', border: 'none' }}>
+                                                    <button onClick={() => handleSaveEdit(camp.id, camp.name)} style={{ background: 'none', color: 'var(--color-success)', cursor: 'pointer', border: 'none' }}>
                                                         <Check size={17} />
                                                     </button>
-                                                    <button onClick={cancelEditing} style={{ background: 'none', color: '#A3AED0', cursor: 'pointer', border: 'none' }}>
+                                                    <button onClick={cancelEditing} style={{ background: 'none', color: 'var(--color-text-secondary)', cursor: 'pointer', border: 'none' }}>
                                                         <X size={17} />
                                                     </button>
                                                 </>
@@ -615,17 +625,17 @@ export default function Camps() {
                                                     <button
                                                         onClick={() => handleToggleCompleted(camp)}
                                                         title={camp.is_completed ? 'Oznacz jako aktywny' : 'Oznacz jako zakończony'}
-                                                        style={{ background: 'none', color: camp.is_completed ? '#05CD99' : '#CBD5E1', cursor: 'pointer', border: 'none' }}
+                                                        style={{ background: 'none', color: camp.is_completed ? 'var(--color-success)' : '#CBD5E1', cursor: 'pointer', border: 'none' }}
                                                     >
                                                         {camp.is_completed ? <CheckCircle2 size={16} /> : <Circle size={16} />}
                                                     </button>
                                                     <button onClick={() => startEditing(camp)} style={{ background: 'none', color: '#4318FF', cursor: 'pointer', border: 'none' }} title="Edytuj">
                                                         <Edit2 size={16} />
                                                     </button>
-                                                    <button onClick={() => handleRegenerateTags(camp)} style={{ background: 'none', color: '#05CD99', cursor: 'pointer', border: 'none' }} title="Wygeneruj aliasy ze słów nazwy">
+                                                    <button onClick={() => handleRegenerateTags(camp)} style={{ background: 'none', color: 'var(--color-success)', cursor: 'pointer', border: 'none' }} title="Wygeneruj aliasy ze słów nazwy">
                                                         <RefreshCw size={16} />
                                                     </button>
-                                                    <button onClick={() => handleDeleteCamp(camp.id)} style={{ background: 'none', color: '#EE5D50', cursor: 'pointer', border: 'none' }} title="Usuń wyjazd">
+                                                    <button onClick={() => handleDeleteCamp(camp.id)} style={{ background: 'none', color: 'var(--color-error)', cursor: 'pointer', border: 'none' }} title="Usuń wyjazd">
                                                         <Trash2 size={16} />
                                                     </button>
                                                 </>
@@ -652,7 +662,7 @@ export default function Camps() {
                         Auto-alias z nazwy
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ display: 'inline-block', width: '28px', height: '16px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '4px' }} />
+                        <span style={{ display: 'inline-block', width: '28px', height: '16px', background: 'var(--color-primary-light)', border: '1px solid #BFDBFE', borderRadius: '4px' }} />
                         Ręczny alias — fraza z tytułu przelewu (wyższy priorytet w dopasowaniu)
                     </span>
                 </div>

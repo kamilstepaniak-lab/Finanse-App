@@ -7,6 +7,27 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const BATCH_SIZE = 20;
+const MAX_TRANSACTIONS_PER_CALL = 500;
+
+// Hostname of this deployment — used to reject cross-origin callers
+const ALLOWED_HOSTS = [
+    process.env.VERCEL_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    'localhost:5173',
+    'localhost:3000',
+    '127.0.0.1:5173',
+].filter(Boolean);
+
+const isAllowedOrigin = (req) => {
+    const raw = req.headers.origin || req.headers.referer || '';
+    if (!raw) return false;
+    try {
+        const host = new URL(raw).host;
+        return ALLOWED_HOSTS.some(h => host === h || host.endsWith(`.${h}`));
+    } catch {
+        return false;
+    }
+};
 
 // Normalize string: lowercase + strip Polish diacritics
 const normStr = (s) => {
@@ -69,10 +90,27 @@ Odpowiedz TYLKO tablicą JSON (bez markdown, bez komentarzy) w tej samej kolejno
 export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).end();
 
+    // Reject requests from outside the deployment — prevents random callers from burning Anthropic credits.
+    // Not a security boundary on its own (Origin is client-controlled), but filters out opportunistic abuse.
+    if (!isAllowedOrigin(req)) {
+        console.warn('Rejected categorize-ai request — origin:', req.headers.origin, 'referer:', req.headers.referer);
+        return res.status(403).json({ error: 'forbidden' });
+    }
+
+    // Optional shared secret — enables auth if CATEGORIZE_AI_TOKEN is set on the server.
+    // Frontend must send it as x-api-token header (e.g. via VITE_CATEGORIZE_AI_TOKEN).
+    const expectedToken = process.env.CATEGORIZE_AI_TOKEN;
+    if (expectedToken) {
+        const token = req.headers['x-api-token'];
+        if (token !== expectedToken) return res.status(401).json({ error: 'unauthorized' });
+    }
+
     const { transactions, categories, camps } = req.body;
 
     if (!Array.isArray(transactions) || transactions.length === 0)
         return res.status(400).json({ error: 'transactions array required' });
+    if (transactions.length > MAX_TRANSACTIONS_PER_CALL)
+        return res.status(400).json({ error: `too many transactions (max ${MAX_TRANSACTIONS_PER_CALL})` });
     if (!Array.isArray(categories) || categories.length === 0)
         return res.status(400).json({ error: 'categories array required' });
     if (!Array.isArray(camps))

@@ -358,7 +358,7 @@ export const getActivityLog = async ({ limit = 200, offset = 0, action = null, d
     if (action) q = q.eq('action', action);
     if (dateFrom) q = q.gte('created_at', `${dateFrom}T00:00:00Z`);
     if (dateTo) q = q.lte('created_at', `${dateTo}T23:59:59Z`);
-    if (search) q = q.or(`message.ilike.%${search}%`);
+    if (search) q = q.ilike('message', `%${search}%`);
 
     const { data, error, count } = await q;
     if (error) {

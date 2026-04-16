@@ -96,10 +96,17 @@ export default function Dashboard() {
         loadData();
     }, []);
 
-    // Reset to page 1 whenever any applied filter or sort changes
+    // Reset to page 1 whenever any applied filter or sort changes.
+    // Also clear lastClickedIndex — the index refers to a prior displayed list and would select the wrong range after filter/page change.
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, filterType, filterCategory, filterCamp, dateFrom, dateTo, filterReview, sortConfig, pageSize]);
+        setLastClickedIndex(null);
+    }, [searchTerm, filterType, filterCategory, filterCamp, dateFrom, dateTo, filterReview, filterSplit, sortConfig, pageSize]);
+
+    // Also reset shift-click anchor when user navigates between pages
+    useEffect(() => {
+        setLastClickedIndex(null);
+    }, [currentPage]);
 
     // Auto-fill NBP exchange rate when currency switches to EUR or date changes
     useEffect(() => {
@@ -410,9 +417,13 @@ export default function Dashboard() {
                 camps: activeCamps.map(c => ({ name: c.name, tags: c.tags || [], year: c.year, season: c.season })),
             };
 
+            const headers = { 'Content-Type': 'application/json' };
+            if (import.meta.env.VITE_CATEGORIZE_AI_TOKEN) {
+                headers['x-api-token'] = import.meta.env.VITE_CATEGORIZE_AI_TOKEN;
+            }
             const response = await fetch('/api/categorize-ai', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(payload),
             });
 
@@ -859,18 +870,19 @@ export default function Dashboard() {
                 const edits = next[tid];
                 if (!edits) return;
                 const prevTx = transactions.find(t => t.id === tid);
-                // If camp is empty after edit AND category requires a camp → mark as needs_review
-                const finalCamp = 'camp' in edits ? edits.camp : undefined;
+                // Merge pending edit with previous values so needs_review reflects the full row
+                const hasCampEdit = 'camp' in edits;
+                const mergedCamp = hasCampEdit ? edits.camp : prevTx?.camp;
                 const finalCategory = 'category' in edits ? edits.category : prevTx?.category;
                 const campRequired = isTurystyczna(finalCategory);
                 // Validate camp exists in camps list (prevent orphaned references)
-                const campValid = !finalCamp || camps.some(c => c.name === finalCamp);
-                if (finalCamp && !campValid) {
-                    console.warn(`Camp "${finalCamp}" not found in camps list — clearing`);
+                const campValid = !mergedCamp || camps.some(c => c.name === mergedCamp);
+                if (hasCampEdit && mergedCamp && !campValid) {
+                    console.warn(`Camp "${mergedCamp}" not found in camps list — clearing`);
                     edits.camp = '';
                 }
-                const effectiveCamp = campValid ? finalCamp : '';
-                const needsReview = campRequired ? (effectiveCamp !== undefined ? !effectiveCamp : false) : false;
+                const effectiveCamp = campValid ? mergedCamp : '';
+                const needsReview = campRequired && !effectiveCamp;
                 const updates = { ...edits, needs_review: needsReview };
                 setTransactions(p => {
                     const tx = p.find(t => t.id === tid);
@@ -944,9 +956,9 @@ export default function Dashboard() {
     };
 
     const getCategoryStyle = (cat) => {
-        if (cat === 'usługa turystyczna') return { color: '#05CD99', fontWeight: 600 };
+        if (cat === 'usługa turystyczna') return { color: 'var(--color-success)', fontWeight: 600 };
         if (cat === 'nauka pływania') return { color: '#4318FF', fontWeight: 600 };
-        if (cat === 'Szkolenie') return { color: '#FFB547', fontWeight: 600 };
+        if (cat === 'Szkolenie') return { color: 'var(--color-warning)', fontWeight: 600 };
         return {};
     };
 
@@ -1131,31 +1143,31 @@ export default function Dashboard() {
             {/* ── KPI Cards ── */}
             <div className="kpi-grid">
                 <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,#05CD99,#00B385)' }}>
+                    <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,var(--color-success),#00B385)' }}>
                         <TrendingUp size={20} color="#fff" />
                     </div>
                     <div className="kpi-body">
                         <span className="kpi-label">Przychody</span>
-                        <span className="kpi-value" style={{ color: '#05CD99' }}>{fmt(kpiIncome)} PLN</span>
+                        <span className="kpi-value" style={{ color: 'var(--color-success)' }}>{fmt(kpiIncome)} PLN</span>
                         {kpiEurIncome > 0 && (
                             <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>w tym {fmt(kpiEurIncome)} EUR</span>
                         )}
                     </div>
                 </div>
                 <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,#EE5D50,#FF8B83)' }}>
+                    <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,var(--color-error),#FF8B83)' }}>
                         <TrendingDown size={20} color="#fff" />
                     </div>
                     <div className="kpi-body">
                         <span className="kpi-label">Wydatki</span>
-                        <span className="kpi-value" style={{ color: '#EE5D50' }}>{fmt(kpiExpense)} PLN</span>
+                        <span className="kpi-value" style={{ color: 'var(--color-error)' }}>{fmt(kpiExpense)} PLN</span>
                         {kpiEurExpense > 0 && (
                             <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>w tym {fmt(kpiEurExpense)} EUR</span>
                         )}
                     </div>
                 </div>
                 <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: (kpiReview + kpiMissing) > 0 ? 'linear-gradient(135deg,#EE5D50,#DC2626)' : 'linear-gradient(135deg,#FFB547,#FF8C00)' }}>
+                    <div className="kpi-icon-wrap" style={{ background: (kpiReview + kpiMissing) > 0 ? 'linear-gradient(135deg,var(--color-error),#DC2626)' : 'linear-gradient(135deg,var(--color-warning),#FF8C00)' }}>
                         <Receipt size={20} color="#fff" />
                     </div>
                     <div className="kpi-body">
@@ -1196,9 +1208,9 @@ export default function Dashboard() {
                         className={`review-btn ${filterReview === 'missing' ? 'active' : ''}`}
                         onClick={() => { setFilterReview(v => v === 'missing' ? '' : 'missing'); setFilterSplit(false); }}
                         title="Pokaż transakcje bez przypisanego obozu"
-                        style={{ borderColor: '#EE5D50', color: filterReview === 'missing' ? '#fff' : '#991B1B', background: filterReview === 'missing' ? '#EE5D50' : 'transparent' }}
+                        style={{ borderColor: 'var(--color-error)', color: filterReview === 'missing' ? '#fff' : '#991B1B', background: filterReview === 'missing' ? 'var(--color-error)' : 'transparent' }}
                     >
-                        <span className="review-dot" style={{ background: '#EE5D50' }} />
+                        <span className="review-dot" style={{ background: 'var(--color-error)' }} />
                         Bez obozu ({kpiMissing})
                     </button>
                     <button
@@ -1392,7 +1404,7 @@ export default function Dashboard() {
             <div className="card table-card">
                 <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3>Ostatnie transakcje</h3>
-                    <span style={{ fontSize: '13px', color: '#A3AED0' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
                         Strona {currentPage} z {totalPages || 1} · {filteredTransactions?.length ?? 0} transakcji łącznie
                     </span>
                 </div>
@@ -1448,7 +1460,7 @@ export default function Dashboard() {
                                             )}
                                             <button
                                                 onClick={() => isAddingHere ? splitWizardCancel() : openSplitWizard(t.id)}
-                                                style={{ background: 'none', border: '1px dashed #A3AED0', borderRadius: '50%', cursor: 'pointer', fontSize: '14px', color: isAddingHere ? '#EE5D50' : '#A3AED0', width: '20px', height: '20px', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                                style={{ background: 'none', border: '1px dashed var(--color-text-secondary)', borderRadius: '50%', cursor: 'pointer', fontSize: '14px', color: isAddingHere ? 'var(--color-error)' : 'var(--color-text-secondary)', width: '20px', height: '20px', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
                                                 title={isAddingHere ? 'Anuluj podział' : 'Podziel transakcję'}
                                             >{isAddingHere ? '×' : '+'}</button>
                                         </div>
@@ -1493,9 +1505,9 @@ export default function Dashboard() {
                                                     {hasPending ? (
                                                         <>
                                                             <button onClick={() => handleCommitEdit(t.id)} title="Zatwierdź zmiany"
-                                                                style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
+                                                                style={{ background: 'var(--color-success)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
                                                             <button onClick={() => handleCancelEdit(t.id)} title="Anuluj zmiany"
-                                                                style={{ background: '#A3AED0', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
+                                                                style={{ background: 'var(--color-text-secondary)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
                                                         </>
                                                     ) : t.needs_review ? (
                                                         <button className="confirm-btn" onClick={() => handleCampConfirm(t.id)} title="Zatwierdź dopasowanie">✓</button>
@@ -1549,11 +1561,11 @@ export default function Dashboard() {
                                                     className="category-select"
                                                     style={{
                                                         ...getCategoryStyle(displayCat),
-                                                        ...(!displayCat ? { color: '#EE5D50', fontWeight: 600 } : {}),
+                                                        ...(!displayCat ? { color: 'var(--color-error)', fontWeight: 600 } : {}),
                                                         ...(hasPending && pendingCat !== undefined ? { border: '2px dashed #4318FF', background: '#F5F3FF' } : {})
                                                     }}
                                                 >
-                                                    <option value="" style={{ color: '#EE5D50' }}>-- Wybierz --</option>
+                                                    <option value="" style={{ color: 'var(--color-error)' }}>-- Wybierz --</option>
                                                     {displayCategories.map(c => (
                                                         <option key={c.id} value={c.name}>{c.name}</option>
                                                     ))}
@@ -1623,7 +1635,7 @@ export default function Dashboard() {
                                             </div>
                                         ) : (
                                             <div
-                                                style={{ cursor: 'pointer', color: '#A3AED0', transition: 'transform 0.2s', display: 'flex', justifyContent: 'center' }}
+                                                style={{ cursor: 'pointer', color: 'var(--color-text-secondary)', transition: 'transform 0.2s', display: 'flex', justifyContent: 'center' }}
                                                 onClick={() => {
                                                     const newNote = window.prompt('Dodaj nową notatkę:', '');
                                                     if (newNote !== null && newNote.trim() !== '') {
@@ -1653,9 +1665,9 @@ export default function Dashboard() {
                                     <tr key={child.id} className="sub-transaction">
                                         <td></td>
                                         <td></td>
-                                        <td style={{ color: '#A3AED0', fontSize: '13px' }}>{child.date}</td>
+                                        <td style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>{child.date}</td>
                                         <td></td>
-                                        <td style={{ color: '#A3AED0', fontSize: '13px', fontStyle: 'italic' }}>
+                                        <td style={{ color: 'var(--color-text-secondary)', fontSize: '13px', fontStyle: 'italic' }}>
                                             ↳ {child.note || 'Podział'}
                                         </td>
                                         <td className={child.amount > 0 ? 'amount-pos' : 'amount-neg'}>
@@ -1687,9 +1699,9 @@ export default function Dashboard() {
                                                 {pendingEdits[child.id] && (
                                                     <>
                                                         <button onClick={() => handleCommitEdit(child.id)} title="Zatwierdź"
-                                                            style={{ background: '#05CD99', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
+                                                            style={{ background: 'var(--color-success)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✓</button>
                                                         <button onClick={() => handleCancelEdit(child.id)} title="Anuluj"
-                                                            style={{ background: '#A3AED0', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
+                                                            style={{ background: 'var(--color-text-secondary)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 700, width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
                                                     </>
                                                 )}
                                             </div>
@@ -1697,7 +1709,7 @@ export default function Dashboard() {
                                         <td style={{ textAlign: 'center' }}>
                                             <button
                                                 onClick={() => handleDeleteSub(child.id)}
-                                                style={{ background: 'none', border: 'none', color: '#EE5D50', cursor: 'pointer', fontSize: '16px', fontWeight: 700 }}
+                                                style={{ background: 'none', border: 'none', color: 'var(--color-error)', cursor: 'pointer', fontSize: '16px', fontWeight: 700 }}
                                                 title="Usuń podtransakcję"
                                             >✕</button>
                                         </td>
@@ -1720,14 +1732,14 @@ export default function Dashboard() {
                                             {wizard.confirmedParts.map((part, pi) => (
                                                 <tr key={`wizard-confirmed-${pi}`} className="add-sub-row">
                                                     <td colSpan={2}></td>
-                                                    <td colSpan={2} style={{ color: '#05CD99', fontSize: '13px', fontWeight: 600 }}>
+                                                    <td colSpan={2} style={{ color: 'var(--color-success)', fontSize: '13px', fontWeight: 600 }}>
                                                         ✓ Część {pi + 1}
                                                     </td>
-                                                    <td style={{ fontSize: '13px', color: '#2B3674', fontWeight: 700 }}>
+                                                    <td style={{ fontSize: '13px', color: 'var(--color-text-main)', fontWeight: 700 }}>
                                                         {part.amount.toFixed(2)} PLN
                                                     </td>
-                                                    <td style={{ fontSize: '13px', color: '#2B3674' }}>{part.category || '—'}</td>
-                                                    <td style={{ fontSize: '13px', color: '#2B3674' }}>{part.camp || '—'}</td>
+                                                    <td style={{ fontSize: '13px', color: 'var(--color-text-main)' }}>{part.category || '—'}</td>
+                                                    <td style={{ fontSize: '13px', color: 'var(--color-text-main)' }}>{part.camp || '—'}</td>
                                                     <td colSpan={2}></td>
                                                 </tr>
                                             ))}
@@ -1737,14 +1749,14 @@ export default function Dashboard() {
                                                 <td colSpan={2}></td>
                                                 <td colSpan={2} style={{ color: '#4318FF', fontSize: '13px', fontWeight: 600 }}>
                                                     {canFinish
-                                                        ? <span>Część {stepNum} <span style={{ fontWeight: 400, color: '#A3AED0', fontSize: '12px' }}>· kwota: <strong style={{ color: '#2B3674' }}>{remaining.toFixed(2)} PLN</strong> (auto)</span></span>
-                                                        : <span>Część {stepNum} <span style={{ fontWeight: 400, color: '#A3AED0', fontSize: '12px' }}>· podaj kwotę tej części</span></span>
+                                                        ? <span>Część {stepNum} <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)', fontSize: '12px' }}>· kwota: <strong style={{ color: 'var(--color-text-main)' }}>{remaining.toFixed(2)} PLN</strong> (auto)</span></span>
+                                                        : <span>Część {stepNum} <span style={{ fontWeight: 400, color: 'var(--color-text-secondary)', fontSize: '12px' }}>· podaj kwotę tej części</span></span>
                                                     }
                                                 </td>
                                                 <td>
                                                     {canFinish ? (
                                                         /* Last part: amount locked to exact remaining */
-                                                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#2B3674', padding: '4px 10px', background: '#F0FFF4', border: '1px solid #05CD99', borderRadius: '6px', display: 'inline-block', minWidth: '90px' }}>
+                                                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-text-main)', padding: '4px 10px', background: '#F0FFF4', border: '1px solid var(--color-success)', borderRadius: '6px', display: 'inline-block', minWidth: '90px' }}>
                                                             {remaining.toFixed(2)} PLN
                                                         </span>
                                                     ) : (
@@ -1787,7 +1799,7 @@ export default function Dashboard() {
                                                 <td colSpan={2} style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                                                     {wizard.confirmedParts.length > 0 && (
                                                         <button onClick={splitWizardBack}
-                                                            style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#2B3674', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}
+                                                            style={{ background: '#F4F7FE', border: '1px solid #E2E8F0', borderRadius: '8px', color: 'var(--color-text-main)', cursor: 'pointer', fontSize: '12px', fontWeight: 600, padding: '4px 10px' }}
                                                         >← Wróć</button>
                                                     )}
                                                     {/* Amount editable → show "Dalej" */}
@@ -1804,11 +1816,11 @@ export default function Dashboard() {
                                                     )}
                                                     {canFinish && (
                                                         <button onClick={splitWizardCommit}
-                                                            style={{ background: '#05CD99', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}
+                                                            style={{ background: 'var(--color-success)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: 700, padding: '5px 14px' }}
                                                         >✓ Gotowe</button>
                                                     )}
                                                     <button onClick={splitWizardCancel}
-                                                        style={{ background: 'none', border: '1px solid #E2E8F0', borderRadius: '8px', color: '#A3AED0', cursor: 'pointer', fontSize: '12px', padding: '4px 8px' }}
+                                                        style={{ background: 'none', border: '1px solid #E2E8F0', borderRadius: '8px', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '12px', padding: '4px 8px' }}
                                                     >Anuluj</button>
                                                 </td>
                                             </tr>
@@ -1828,12 +1840,12 @@ export default function Dashboard() {
                             <button
                                 onClick={() => setCurrentPage(1)}
                                 disabled={currentPage === 1}
-                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === 1 ? '#F4F7FE' : '#fff', cursor: currentPage === 1 ? 'default' : 'pointer', color: currentPage === 1 ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === 1 ? '#F4F7FE' : '#fff', cursor: currentPage === 1 ? 'default' : 'pointer', color: currentPage === 1 ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                             >«</button>
                             <button
                                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                                 disabled={currentPage === 1}
-                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === 1 ? '#F4F7FE' : '#fff', cursor: currentPage === 1 ? 'default' : 'pointer', color: currentPage === 1 ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === 1 ? '#F4F7FE' : '#fff', cursor: currentPage === 1 ? 'default' : 'pointer', color: currentPage === 1 ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                             >‹</button>
 
                             {/* Page number buttons — show up to 7 pages around current */}
@@ -1846,23 +1858,23 @@ export default function Dashboard() {
                                 }, [])
                                 .map((p, i) =>
                                     p === '...'
-                                        ? <span key={`dots-${i}`} style={{ padding: '0 4px', color: '#A3AED0' }}>…</span>
+                                        ? <span key={`dots-${i}`} style={{ padding: '0 4px', color: 'var(--color-text-secondary)' }}>…</span>
                                         : <button
                                             key={p}
                                             onClick={() => setCurrentPage(p)}
-                                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: p === currentPage ? '#4318FF' : '#fff', color: p === currentPage ? '#fff' : '#2B3674', cursor: 'pointer', fontWeight: p === currentPage ? 700 : 500, minWidth: '36px' }}
+                                            style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: p === currentPage ? '#4318FF' : '#fff', color: p === currentPage ? '#fff' : 'var(--color-text-main)', cursor: 'pointer', fontWeight: p === currentPage ? 700 : 500, minWidth: '36px' }}
                                         >{p}</button>
                                 )}
 
                             <button
                                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                                 disabled={currentPage === totalPages}
-                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === totalPages ? '#F4F7FE' : '#fff', cursor: currentPage === totalPages ? 'default' : 'pointer', color: currentPage === totalPages ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === totalPages ? '#F4F7FE' : '#fff', cursor: currentPage === totalPages ? 'default' : 'pointer', color: currentPage === totalPages ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                             >›</button>
                             <button
                                 onClick={() => setCurrentPage(totalPages)}
                                 disabled={currentPage === totalPages}
-                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === totalPages ? '#F4F7FE' : '#fff', cursor: currentPage === totalPages ? 'default' : 'pointer', color: currentPage === totalPages ? '#A3AED0' : '#2B3674', fontWeight: 600 }}
+                                style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid #E2E8F0', background: currentPage === totalPages ? '#F4F7FE' : '#fff', cursor: currentPage === totalPages ? 'default' : 'pointer', color: currentPage === totalPages ? 'var(--color-text-secondary)' : 'var(--color-text-main)', fontWeight: 600 }}
                             >»</button>
                         </div>
                     )}

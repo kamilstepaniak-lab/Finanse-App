@@ -7,7 +7,7 @@ import {
 import { TrendingUp, TrendingDown, ArrowUpDown, ArrowDownUp, Download } from 'lucide-react';
 import './Reports.css';
 
-const COLORS = ['#1570EF', '#3B8AFF', '#059669', '#FFB547', '#DC2626', '#9c27b0', '#e91e63', '#EFF4FB'];
+const COLORS = ['var(--color-primary)', '#3B8AFF', '#059669', 'var(--color-warning)', '#DC2626', '#9c27b0', '#e91e63', '#EFF4FB'];
 
 const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -50,8 +50,24 @@ export default function Reports() {
     const [selectedMonth, setSelectedMonthState] = useState(initMonth);
     const [selectedYear, setSelectedYearState] = useState(initYear);
 
-    const setDateFrom = (val) => { setDateFromState(val); localStorage.setItem('reports_dateFrom', val); };
-    const setDateTo = (val) => { setDateToState(val); localStorage.setItem('reports_dateTo', val); };
+    const setDateFrom = (val) => {
+        setDateFromState(val);
+        localStorage.setItem('reports_dateFrom', val);
+        // Auto-correct: if new 'from' is after current 'to', align 'to' upward
+        if (val && dateTo && val > dateTo) {
+            setDateToState(val);
+            localStorage.setItem('reports_dateTo', val);
+        }
+    };
+    const setDateTo = (val) => {
+        setDateToState(val);
+        localStorage.setItem('reports_dateTo', val);
+        // Auto-correct: if new 'to' is before current 'from', align 'from' downward
+        if (val && dateFrom && val < dateFrom) {
+            setDateFromState(val);
+            localStorage.setItem('reports_dateFrom', val);
+        }
+    };
     const setSelectedMonth = (val) => { setSelectedMonthState(val); localStorage.setItem('reports_selectedMonth', val); };
     const setSelectedYear = (val) => { setSelectedYearState(val); localStorage.setItem('reports_selectedYear', val); };
 
@@ -144,7 +160,7 @@ export default function Reports() {
             if (!t.camp && !isTurystyczna) return;
             const campName = t.camp
                 ? t.camp
-                : 'Bez dopasowanych wyjazdów';
+                : 'Bez przypisanego wyjazdu';
             if (!incomeByCampMap[campName]) incomeByCampMap[campName] = 0;
             incomeByCampMap[campName] += t.amount;
 
@@ -202,7 +218,7 @@ export default function Reports() {
             } else if (t.amount < 0) {
                 campName = 'Koszty ogólne';
             } else if (isTurystyczna) {
-                campName = 'Bez dopasowanych wyjazdów';
+                campName = 'Bez przypisanego wyjazdu';
             } else {
                 return; // przychody niebędące turystyczną bez obozu — nie wliczaj do rentowności
             }
@@ -287,10 +303,17 @@ export default function Reports() {
     const ComparisonBadge = ({ current, previous, inverse = false }) => {
         const pct = pctChange(current, previous);
         if (pct === null) return null;
+        if (pct === 0) {
+            return (
+                <small style={{ color: 'var(--color-text-secondary)', fontWeight: 600, fontSize: '11px' }}>
+                    Bez zmian vs. poprzedni okres
+                </small>
+            );
+        }
         const isPositive = inverse ? pct < 0 : pct > 0;
         return (
             <small style={{
-                color: isPositive ? '#059669' : '#DC2626',
+                color: isPositive ? 'var(--color-success)' : 'var(--color-error)',
                 fontWeight: 600,
                 fontSize: '11px'
             }}>
@@ -460,7 +483,7 @@ export default function Reports() {
                                         <td>{item.name}</td>
                                         <td>
                                             {item.season === 'lato' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#FEF3C7', color: '#B45309', borderRadius: '6px', padding: '2px 8px' }}>☀️ Lato</span>}
-                                            {item.season === 'zima' && <span style={{ fontSize: '11px', fontWeight: 700, background: '#EFF6FF', color: '#1570EF', borderRadius: '6px', padding: '2px 8px' }}>❄️ Zima</span>}
+                                            {item.season === 'zima' && <span style={{ fontSize: '11px', fontWeight: 700, background: 'var(--color-primary-light)', color: 'var(--color-primary)', borderRadius: '6px', padding: '2px 8px' }}>❄️ Zima</span>}
                                             {!item.season && <span style={{ fontSize: '11px', color: '#94A3B8' }}>—</span>}
                                         </td>
                                         <td className="pos fw-bold">{item.value.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
@@ -496,7 +519,7 @@ export default function Reports() {
                                         const n = cat.name.toLowerCase();
                                         const isTurystyczna = n.includes('turystyczna');
                                         const catColor = isTurystyczna ? '#059669'
-                                            : n.includes('pływania') ? '#1570EF'
+                                            : n.includes('pływania') ? 'var(--color-primary)'
                                             : n.includes('szkolenie') ? '#B07A1A'
                                             : undefined;
                                         return (
@@ -511,9 +534,9 @@ export default function Reports() {
                                                         <td style={{ paddingLeft: '24px', fontSize: '12px', color: '#B45309' }}>☀️ Obozy letnie</td>
                                                         <td style={{ fontSize: '12px', color: '#B45309', fontWeight: 600 }}>{reportData.sumLato.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
                                                     </tr>
-                                                    <tr style={{ background: '#EFF6FF' }}>
-                                                        <td style={{ paddingLeft: '24px', fontSize: '12px', color: '#1570EF' }}>❄️ Obozy zimowe</td>
-                                                        <td style={{ fontSize: '12px', color: '#1570EF', fontWeight: 600 }}>{reportData.sumZima.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
+                                                    <tr style={{ background: 'var(--color-primary-light)' }}>
+                                                        <td style={{ paddingLeft: '24px', fontSize: '12px', color: 'var(--color-primary)' }}>❄️ Obozy zimowe</td>
+                                                        <td style={{ fontSize: '12px', color: 'var(--color-primary)', fontWeight: 600 }}>{reportData.sumZima.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
                                                     </tr>
                                                 </>
                                             )}
@@ -592,7 +615,7 @@ export default function Reports() {
 
                 <div className="grid-secondary-new">
                     <div className="chart-container expenses-limit-height">
-                        <h3><TrendingUp size={17} style={{ color: '#1570EF', marginRight: 8, verticalAlign: 'middle' }} />Top 20 Kontrahentów (Przychody)</h3>
+                        <h3><TrendingUp size={17} style={{ color: 'var(--color-primary)', marginRight: 8, verticalAlign: 'middle' }} />Top 20 Kontrahentów (Przychody)</h3>
                         <div className="table-responsive">
                             <table className="data-table small-table">
                                 <thead>
