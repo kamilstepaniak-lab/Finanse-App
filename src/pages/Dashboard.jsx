@@ -1113,9 +1113,9 @@ export default function Dashboard() {
     const kpiReview      = kpiParents.filter(t => t.needs_review && t.camp).length;
     const kpiMissing     = kpiParents.filter(t => t.needs_review && !t.camp).length;
     const kpiNoCategory  = kpiParents.filter(t => !t.category || t.category === '').length;
-    // allKpiNoCategory uses all transactions (ignores active filters) so the "Nie dopasowane"
-    // button doesn't disappear when another filter is active
-    const allKpiNoCategory = (transactions || []).filter(t => !t.parent_id && !splitParentIds.has(t.id) && (!t.category || t.category === '')).length;
+    // Count across ALL transactions (regardless of active filter) so the badge is always
+    // visible as long as there are uncategorized rows anywhere in the dataset
+    const allKpiNoCategory = (transactions || []).filter(t => !t.parent_id && (!t.category || t.category === '')).length;
     // New KPIs
     const kpiEurIncome = kpiItems.filter(t => t.currency === 'EUR' && t.amount > 0).reduce((s, t) => s + (t.original_amount || 0), 0);
     const kpiEurExpense = kpiItems.filter(t => t.currency === 'EUR' && t.amount < 0).reduce((s, t) => s + Math.abs(t.original_amount || 0), 0);
@@ -1201,17 +1201,15 @@ export default function Dashboard() {
                         <span className="review-dot" style={{ background: '#EE5D50' }} />
                         Bez obozu ({kpiMissing})
                     </button>
-                    {allKpiNoCategory > 0 && (
-                        <button
-                            className={`review-btn ${filterReview === 'no_category' ? 'active' : ''}`}
-                            onClick={() => { setFilterReview(v => v === 'no_category' ? '' : 'no_category'); setFilterSplit(false); }}
-                            title="Pokaż transakcje bez przypisanej kategorii"
-                            style={{ borderColor: '#7C3AED', color: filterReview === 'no_category' ? '#fff' : '#5B21B6', background: filterReview === 'no_category' ? '#7C3AED' : 'transparent' }}
-                        >
-                            <span className="review-dot" style={{ background: '#7C3AED' }} />
-                            Nie dopasowane ({allKpiNoCategory})
-                        </button>
-                    )}
+                    <button
+                        className={`review-btn ${filterReview === 'no_category' ? 'active' : ''}`}
+                        onClick={() => { setFilterReview(v => v === 'no_category' ? '' : 'no_category'); setFilterSplit(false); }}
+                        title="Pokaż transakcje bez przypisanej kategorii"
+                        style={{ borderColor: '#7C3AED', color: filterReview === 'no_category' ? '#fff' : '#5B21B6', background: filterReview === 'no_category' ? '#7C3AED' : 'transparent' }}
+                    >
+                        <span className="review-dot" style={{ background: '#7C3AED' }} />
+                        Nie dopasowane ({allKpiNoCategory})
+                    </button>
                     {splitParentIds.size > 0 && (
                         <button
                             className={`review-btn ${filterSplit ? 'active' : ''}`}
