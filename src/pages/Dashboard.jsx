@@ -18,6 +18,7 @@ import {
     unsubscribe
 } from '../db';
 import { parseCSV, normalizeTransaction } from '../utils/csvParser';
+import { findRateForDate } from '../utils/currencyUtils';
 import { Upload, Search, StickyNote, Wand2, TrendingUp, TrendingDown, Receipt, DollarSign, PieChart, Euro, AlertCircle, Zap, Calendar, Sparkles } from 'lucide-react';
 import './Dashboard.css';
 
@@ -59,6 +60,7 @@ export default function Dashboard() {
     const [loading, setLoading] = useState(true);
     const [filterReview, setFilterReview] = useState(''); // '' | 'uncertain' | 'missing'
     const [filterCampYear, setFilterCampYear] = useState(''); // '' | '2025' | '2026' etc.
+    const [filterSplit, setFilterSplit] = useState(false);
     const [pageSize, setPageSize] = useState(50);
     // Draft filter state (what user is editing before applying)
     const [draft, setDraft] = useState({ searchTerm: '', dateFrom: '', dateTo: '', filterMonth: '', lastDays: '', filterCategory: '', filterCamp: '' });
@@ -99,12 +101,25 @@ export default function Dashboard() {
         setCurrentPage(1);
     }, [searchTerm, filterType, filterCategory, filterCamp, dateFrom, dateTo, filterReview, sortConfig, pageSize]);
 
+    // Auto-fill NBP exchange rate when currency switches to EUR or date changes
+    useEffect(() => {
+        if (cashForm.currency !== 'EUR' || !showCashModal) return;
+        if (cashForm.exchangeRate) return; // don't overwrite rate the user already typed
+        const date = cashForm.date || new Date().toISOString().slice(0, 10);
+        findRateForDate(date, 'EUR')
+            .then(rate => {
+                if (rate) setCashForm(prev => prev.exchangeRate ? prev : { ...prev, exchangeRate: String(rate).replace('.', ',') });
+            })
+            .catch(() => {}); // user can enter manually if NBP is unavailable
+    }, [cashForm.currency, cashForm.date, showCashModal]);
+
     const applyFilters = () => {
         setSearchTerm(draft.searchTerm);
         setDateFrom(draft.dateFrom);
         setDateTo(draft.dateTo);
         setFilterCategory(draft.filterCategory);
         setFilterCamp(draft.filterCamp);
+        setSelectedIds(new Set());
     };
 
     const clearFilters = () => {
@@ -117,6 +132,8 @@ export default function Dashboard() {
         setFilterCamp('');
         setFilterType('all');
         setFilterReview('');
+        setFilterSplit(false);
+        setSelectedIds(new Set());
     };
 
     const hasActiveDraft = draft.searchTerm !== searchTerm || draft.dateFrom !== dateFrom || draft.dateTo !== dateTo || draft.filterCategory !== filterCategory || draft.filterCamp !== filterCamp;
@@ -130,23 +147,24 @@ export default function Dashboard() {
         filterCamp,
         filterType !== 'all' ? filterType : '',
         filterReview,
+        filterSplit ? 'split' : '',
     ].filter(Boolean).length;
 
     // Setup realtime subscriptions
     useEffect(() => {
         const transactionsChannel = subscribeToTransactions((payload) => {
             console.log('Transaction change:', payload);
-            loadTransactions(); // Reload in background without toggling `loading` state
+            loadTransactions().catch(err => console.error('Realtime: loadTransactions failed:', err));
         });
 
         const categoriesChannel = subscribeToCategories((payload) => {
             console.log('Category change:', payload);
-            loadCategories();
+            loadCategories().catch(err => console.error('Realtime: loadCategories failed:', err));
         });
 
         const campsChannel = subscribeToCamps((payload) => {
             console.log('Camp change:', payload);
-            loadCamps();
+            loadCamps().catch(err => console.error('Realtime: loadCamps failed:', err));
         });
 
         return () => {
@@ -347,16 +365,33 @@ export default function Dashboard() {
         }
     };
 
+    const AI_PROCESSED_KEY = 'ai_processed_ids';
+    const getAiProcessedIds = () => {
+        try { return new Set(JSON.parse(localStorage.getItem(AI_PROCESSED_KEY) || '[]')); } catch { return new Set(); }
+    };
+    const saveAiProcessedIds = (newIds) => {
+        const existing = getAiProcessedIds();
+        newIds.forEach(id => existing.add(id));
+        localStorage.setItem(AI_PROCESSED_KEY, JSON.stringify([...existing]));
+    };
+
     const aiCategorize = async () => {
-        const pool = transactions.filter(t => t.needs_review === true && !t.parent_id);
+        const aiProcessedIds = getAiProcessedIds();
+        const pool = transactions.filter(t => t.needs_review === true && !t.parent_id && !aiProcessedIds.has(t.id));
+
+        const alreadyAnalyzed = transactions.filter(t => t.needs_review === true && !t.parent_id && aiProcessedIds.has(t.id)).length;
 
         if (pool.length === 0) {
-            alert('Brak transakcji oznaczonych "do przejrzenia". Nie ma czego kategoryzować.');
+            const msg = alreadyAnalyzed > 0
+                ? `Wszystkie ${alreadyAnalyzed} transakcji były już przeanalizowane przez AI. Użyj "Wyczyść filtry" jeśli chcesz je przeanalizować ponownie.`
+                : 'Brak transakcji oznaczonych "do przejrzenia". Nie ma czego kategoryzować.';
+            alert(msg);
             return;
         }
 
+        const skippedInfo = alreadyAnalyzed > 0 ? `\n(Pominięto ${alreadyAnalyzed} już przeanalizowanych)` : '';
         if (!window.confirm(
-            `AI-dopasuj przeanalizuje ${pool.length} transakcji oznaczonych do przejrzenia.\n` +
+            `AI-dopasuj przeanalizuje ${pool.length} transakcji oznaczonych do przejrzenia.${skippedInfo}\n` +
             `Claude przypisze kategorię i wyjazd jednocześnie.\n` +
             `Istniejące wartości zostaną nadpisane. Kontynuować?`
         )) return;
@@ -425,6 +460,9 @@ export default function Dashboard() {
                 }
             }
 
+            // Remember which transactions were analyzed so they're skipped next time
+            saveAiProcessedIds(pool.map(t => t.id));
+
             alert(
                 `AI-dopasuj zakończone.\n` +
                 `Pewnie dopasowano: ${updatedCount}\n` +
@@ -445,7 +483,7 @@ export default function Dashboard() {
         const targetIds = (selectedIds.has(id) && selectedIds.size > 1) ? Array.from(selectedIds) : [id];
         setTransactions(prev => prev.map(t => targetIds.includes(t.id) ? { ...t, needs_review: false } : t));
         await Promise.all(targetIds.map(sid => updateTransaction(sid, { needs_review: false })));
-        // Log confirmation for each transaction
+        // Log confirmation for each transaction (fire-and-forget)
         targetIds.forEach(tid => {
             const t = transactions.find(x => x.id === tid);
             if (!t) return;
@@ -454,7 +492,7 @@ export default function Dashboard() {
                 transactionId: tid,
                 snapshot: { ...t, needs_review: false },
                 message: `Potwierdzono dopasowanie: ${t.title || ''} → ${t.category || ''}${t.camp ? ` · ${t.camp}` : ''}`,
-            });
+            }).catch(err => console.warn('logActivity failed:', err));
         });
         if (targetIds.length > 1) setSelectedIds(new Set());
     };
@@ -732,15 +770,28 @@ export default function Dashboard() {
     };
 
     const handleRemoveDuplicates = async () => {
-        if (!window.confirm('Czy na pewno chcesz usunąć duplikaty? Zostanie zachowana jedna kopia każdej transakcji (najstarsza według ID).')) return;
+        if (!window.confirm('Czy na pewno chcesz usunąć duplikaty? Zostanie zachowana jedna kopia każdej transakcji (najstarsza według ID, a podzielone transakcje mają priorytet).')) return;
         try {
             const all = await getAllTransactions();
+            // Build set of split parent IDs from current in-memory data
+            const currentSplitParentIds = new Set(
+                all.filter(t => t.parent_id).map(t => t.parent_id)
+            );
             const seen = new Map();
             const idsToDelete = [];
 
-            // Sort by id to keep the first-inserted one
-            const sorted = [...all].sort((a, b) => (a.id < b.id ? -1 : 1));
+            // Sort: split parents first (to preserve them), then by id ascending
+            const sorted = [...all].sort((a, b) => {
+                const aIsSplit = currentSplitParentIds.has(a.id);
+                const bIsSplit = currentSplitParentIds.has(b.id);
+                if (aIsSplit && !bIsSplit) return -1;
+                if (!aIsSplit && bIsSplit) return 1;
+                return a.id < b.id ? -1 : 1;
+            });
             for (const tx of sorted) {
+                // Never mark split children as duplicates — they have the same title/sender
+                // as their parent but intentionally different amounts
+                if (tx.parent_id) continue;
                 const key = `${normalizeDate(tx.date)}|${normalizeAmount(tx.amount)}|${normalizeDedupKey(tx.title)}|${normalizeDedupKey(tx.sender)}`;
                 if (seen.has(key)) {
                     idsToDelete.push(tx.id);
@@ -826,8 +877,8 @@ export default function Dashboard() {
                     if (tx?.parent_id && !needsReview) parentIdsToClear.add(tx.parent_id);
                     return p.map(t => t.id === tid ? { ...t, ...updates } : t);
                 });
-                updateTransaction(tid, updates);
-                // Build diff and log
+                updateTransaction(tid, updates).catch(err => console.error('updateTransaction failed:', err));
+                // Build diff and log (fire-and-forget)
                 if (prevTx) {
                     const changes = {};
                     Object.keys(updates).forEach(k => {
@@ -843,7 +894,7 @@ export default function Dashboard() {
                             snapshot: { ...prevTx, ...updates },
                             changes,
                             message: `Zmieniono ${fieldNames}: ${prevTx.title || ''} (${prevTx.amount} ${prevTx.currency || 'PLN'})`,
-                        });
+                        }).catch(err => console.warn('logActivity failed:', err));
                     }
                 }
                 delete next[tid];
@@ -857,7 +908,7 @@ export default function Dashboard() {
                 setTransactions(p => {
                     const siblings = p.filter(t => t.parent_id === pid);
                     if (siblings.some(t => t.needs_review)) return p; // inne dzieci wciąż do przejrzenia
-                    updateTransaction(pid, { needs_review: false });
+                    updateTransaction(pid, { needs_review: false }).catch(err => console.error('updateTransaction (parent clear) failed:', err));
                     const parent = p.find(t => t.id === pid);
                     if (parent) {
                         logActivity({
@@ -865,7 +916,7 @@ export default function Dashboard() {
                             transactionId: pid,
                             snapshot: parent,
                             message: `Zatwierdzono split: "${parent.title || ''}" — wszystkie dzieci potwierdzone`,
-                        });
+                        }).catch(err => console.warn('logActivity failed:', err));
                     }
                     return p.map(t => t.id === pid ? { ...t, needs_review: false } : t);
                 });
@@ -957,6 +1008,9 @@ export default function Dashboard() {
 
     // Predicate that decides whether a row (parent) appears in the table
     const parentPassesFilters = (t) => {
+        // filterSplit: only show transactions that have been split
+        if (filterSplit && !splitParentIds.has(t.id)) return false;
+
         // For split parents: use only non-category/camp/review filters on the parent itself,
         // then require at least one child matching the category/camp/review filters.
         if (effectiveSplitParentIds.has(t.id)) {
@@ -1059,6 +1113,9 @@ export default function Dashboard() {
     const kpiReview      = kpiParents.filter(t => t.needs_review && t.camp).length;
     const kpiMissing     = kpiParents.filter(t => t.needs_review && !t.camp).length;
     const kpiNoCategory  = kpiParents.filter(t => !t.category || t.category === '').length;
+    // allKpiNoCategory uses all transactions (ignores active filters) so the "Nie dopasowane"
+    // button doesn't disappear when another filter is active
+    const allKpiNoCategory = (transactions || []).filter(t => !t.parent_id && !splitParentIds.has(t.id) && (!t.category || t.category === '')).length;
     // New KPIs
     const kpiEurIncome = kpiItems.filter(t => t.currency === 'EUR' && t.amount > 0).reduce((s, t) => s + (t.original_amount || 0), 0);
     const kpiEurExpense = kpiItems.filter(t => t.currency === 'EUR' && t.amount < 0).reduce((s, t) => s + Math.abs(t.original_amount || 0), 0);
@@ -1081,7 +1138,7 @@ export default function Dashboard() {
                         <span className="kpi-label">Przychody</span>
                         <span className="kpi-value" style={{ color: '#05CD99' }}>{fmt(kpiIncome)} PLN</span>
                         {kpiEurIncome > 0 && (
-                            <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>+ {fmt(kpiEurIncome)} EUR</span>
+                            <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>w tym {fmt(kpiEurIncome)} EUR</span>
                         )}
                     </div>
                 </div>
@@ -1093,28 +1150,19 @@ export default function Dashboard() {
                         <span className="kpi-label">Wydatki</span>
                         <span className="kpi-value" style={{ color: '#EE5D50' }}>{fmt(kpiExpense)} PLN</span>
                         {kpiEurExpense > 0 && (
-                            <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>+ {fmt(kpiEurExpense)} EUR</span>
+                            <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>w tym {fmt(kpiEurExpense)} EUR</span>
                         )}
                     </div>
                 </div>
                 <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: 'linear-gradient(135deg,#FFB547,#FF8C00)' }}>
+                    <div className="kpi-icon-wrap" style={{ background: (kpiReview + kpiMissing) > 0 ? 'linear-gradient(135deg,#EE5D50,#DC2626)' : 'linear-gradient(135deg,#FFB547,#FF8C00)' }}>
                         <Receipt size={20} color="#fff" />
                     </div>
                     <div className="kpi-body">
                         <span className="kpi-label">Transakcji</span>
                         <span className="kpi-value" style={{ color: '#1B2559' }}>{kpiCount.toLocaleString('pl-PL')}</span>
-                    </div>
-                </div>
-                <div className="kpi-card">
-                    <div className="kpi-icon-wrap" style={{ background: (kpiReview + kpiMissing) > 0 ? 'linear-gradient(135deg,#EE5D50,#DC2626)' : 'linear-gradient(135deg,#05CD99,#00B385)' }}>
-                        <AlertCircle size={20} color="#fff" />
-                    </div>
-                    <div className="kpi-body">
-                        <span className="kpi-label">Do przejrzenia</span>
-                        <span className="kpi-value" style={{ color: (kpiReview + kpiMissing) > 0 ? '#EE5D50' : '#05CD99' }}>{kpiReview + kpiMissing}</span>
                         {kpiReview > 0 && (
-                            <span className="kpi-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>{kpiReview} sugerowane</span>
+                            <span className="kpi-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>{kpiReview} do przejrzenia</span>
                         )}
                         {kpiMissing > 0 && (
                             <span className="kpi-badge" style={{ background: '#FEE2E2', color: '#991B1B' }}>{kpiMissing} bez obozu</span>
@@ -1153,7 +1201,7 @@ export default function Dashboard() {
                         <span className="review-dot" style={{ background: '#EE5D50' }} />
                         Bez obozu ({kpiMissing})
                     </button>
-                    {kpiNoCategory > 0 && (
+                    {allKpiNoCategory > 0 && (
                         <button
                             className={`review-btn ${filterReview === 'no_category' ? 'active' : ''}`}
                             onClick={() => setFilterReview(v => v === 'no_category' ? '' : 'no_category')}
@@ -1161,7 +1209,18 @@ export default function Dashboard() {
                             style={{ borderColor: '#7C3AED', color: filterReview === 'no_category' ? '#fff' : '#5B21B6', background: filterReview === 'no_category' ? '#7C3AED' : 'transparent' }}
                         >
                             <span className="review-dot" style={{ background: '#7C3AED' }} />
-                            Nie dopasowane ({kpiNoCategory})
+                            Nie dopasowane ({allKpiNoCategory})
+                        </button>
+                    )}
+                    {splitParentIds.size > 0 && (
+                        <button
+                            className={`review-btn ${filterSplit ? 'active' : ''}`}
+                            onClick={() => setFilterSplit(v => !v)}
+                            title="Pokaż tylko transakcje podzielone przez administratora"
+                            style={{ borderColor: '#0EA5E9', color: filterSplit ? '#fff' : '#0369A1', background: filterSplit ? '#0EA5E9' : 'transparent' }}
+                        >
+                            <span className="review-dot" style={{ background: '#0EA5E9' }} />
+                            Podzielone ({splitParentIds.size})
                         </button>
                     )}
                     <div className="filter-spacer" />

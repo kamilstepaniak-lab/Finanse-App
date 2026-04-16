@@ -60,15 +60,21 @@ export default function Reports() {
 
     useEffect(() => {
         loadData();
-        const channel = subscribeToTransactions(() => loadData());
+        const channel = subscribeToTransactions(() => loadData().catch(err => console.error('Realtime: loadData failed:', err)));
         return () => unsubscribe(channel);
     }, []);
 
     const loadData = async () => {
-        const [txData, campData] = await Promise.all([getAllTransactions(), getAllCamps()]);
-        setTransactions(txData);
-        setCamps(campData);
-        setLoading(false);
+        try {
+            const [txData, campData] = await Promise.all([getAllTransactions(), getAllCamps()]);
+            setTransactions(txData);
+            setCamps(campData);
+        } catch (err) {
+            console.error('Błąd ładowania danych raportów:', err);
+            alert('Błąd pobierania danych finansowych. Sprawdź połączenie z bazą danych.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     // Map camp name → season for quick lookup
@@ -134,14 +140,11 @@ export default function Reports() {
 
         filtered.filter(t => t.amount > 0).forEach(t => {
             const isTurystyczna = t.category && t.category.toLowerCase().includes('turystyczna');
-            let campName;
-            if (t.camp) {
-                campName = t.camp;
-            } else if (isTurystyczna) {
-                campName = 'Bez wyjazdu'; // usługa turystyczna bez przypisanego wyjazdu
-            } else {
-                campName = 'Pozostałe przychody'; // inne kategorie bez wyjazdu
-            }
+            // Ten blok pokazuje TYLKO usługę turystyczną — z obozem lub bez dopasowania
+            if (!t.camp && !isTurystyczna) return;
+            const campName = t.camp
+                ? t.camp
+                : 'Bez dopasowanych wyjazdów';
             if (!incomeByCampMap[campName]) incomeByCampMap[campName] = 0;
             incomeByCampMap[campName] += t.amount;
 
@@ -189,17 +192,19 @@ export default function Reports() {
         const topContractors = Object.values(senderMap).sort((a, b) => b.total - a.total).slice(0, 20);
 
         // Camp profitability (income - expense per camp)
-        // Costs without a camp → "Koszty ogólne", unmatched income → "Bez wyjazdu" or "Pozostałe przychody"
+        // Costs without a camp → "Koszty ogólne", income: only turystyczna counts per camp
         const campProfitMap = {};
         filtered.forEach(t => {
+            const isTurystyczna = t.category && t.category.toLowerCase().includes('turystyczna');
             let campName;
             if (t.camp) {
                 campName = t.camp;
             } else if (t.amount < 0) {
                 campName = 'Koszty ogólne';
+            } else if (isTurystyczna) {
+                campName = 'Bez dopasowanych wyjazdów';
             } else {
-                const isTurystyczna = t.category && t.category.toLowerCase().includes('turystyczna');
-                campName = isTurystyczna ? 'Bez wyjazdu' : 'Pozostałe przychody';
+                return; // przychody niebędące turystyczną bez obozu — nie wliczaj do rentowności
             }
             if (!campProfitMap[campName]) campProfitMap[campName] = { name: campName, income: 0, expense: 0 };
             if (t.amount > 0) campProfitMap[campName].income += t.amount;
@@ -436,6 +441,18 @@ export default function Reports() {
                                 </tr>
                             </thead>
                             <tbody>
+                                {reportData.incomeByCampData.length > 0 && (() => {
+                                    const totalPLN = reportData.incomeByCampData.reduce((s, c) => s + c.value, 0);
+                                    const totalEUR = reportData.incomeByCampData.reduce((s, c) => s + c.eurValue, 0);
+                                    return (
+                                        <tr style={{ background: '#F0FDF4', fontWeight: 700, borderBottom: '2px solid #059669' }}>
+                                            <td style={{ color: '#065F46' }}>SUMA ({reportData.incomeByCampData.length} wyjazdów)</td>
+                                            <td></td>
+                                            <td className="pos fw-bold" style={{ color: '#059669', fontSize: '15px' }}>{totalPLN.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} PLN</td>
+                                            <td className="text-muted">{totalEUR > 0 ? `${totalEUR.toLocaleString('pl-PL', { minimumFractionDigits: 2 })} EUR` : '-'}</td>
+                                        </tr>
+                                    );
+                                })()}
                                 {[...reportData.incomeByCampData]
                                     .sort((a, b) => campSort === 'name' ? a.name.localeCompare(b.name, 'pl') : b.value - a.value)
                                     .map((item, idx) => (

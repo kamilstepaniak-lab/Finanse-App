@@ -1,6 +1,8 @@
 
 // Cache for exchange rates to avoid redundant API calls
 const rateCache = new Map();
+// Cache for original dates where the full 7-day lookback failed — avoids re-querying the same date
+const notFoundCache = new Set();
 
 export const getNBPExchangeRate = async (date, currency = 'EUR') => {
     // NBP API requires YYYY-MM-DD
@@ -50,6 +52,14 @@ export const getNBPExchangeRate = async (date, currency = 'EUR') => {
 
 // Robust function with lookback loop
 export const findRateForDate = async (date, currency = 'EUR') => {
+    const originalDateStr = String(date).slice(0, 10);
+    const notFoundKey = `${currency}-${originalDateStr}`;
+
+    // If this exact date already failed a full lookback in this session, skip immediately
+    if (notFoundCache.has(notFoundKey)) {
+        throw new Error(`Nie znaleziono kursu NBP dla ${originalDateStr} (sprawdzono 7 dni wstecz). Sprawdź datę lub podaj kurs ręcznie.`);
+    }
+
     let currentCheckDate = new Date(date);
     for (let i = 0; i < 7; i++) { // Look back 7 days max
         const dateStr = currentCheckDate.toISOString().slice(0, 10);
@@ -63,20 +73,20 @@ export const findRateForDate = async (date, currency = 'EUR') => {
                 const data = await res.json();
                 const rate = data?.rates?.[0]?.mid;
                 if (rate) {
-                    // Cache this rate for the date found
                     rateCache.set(cacheKey, rate);
-                    // Also cache strictly for the original requested date? No, that's misleading.
                     return rate;
                 }
             }
         } catch (e) {
-            // ignore
+            // ignore network errors, keep trying previous days
         }
 
         // Go back 1 day
         currentCheckDate.setDate(currentCheckDate.getDate() - 1);
     }
-    // Fallback: throw so the caller knows the rate is unknown
-    console.warn(`Could not find NBP rate for ${date} within 7 days.`);
-    throw new Error(`Nie znaleziono kursu NBP dla ${date} (sprawdzono 7 dni wstecz). Sprawdź datę lub podaj kurs ręcznie.`);
+
+    // Mark original date as permanently failed in this session
+    notFoundCache.add(notFoundKey);
+    console.warn(`Could not find NBP rate for ${originalDateStr} within 7 days.`);
+    throw new Error(`Nie znaleziono kursu NBP dla ${originalDateStr} (sprawdzono 7 dni wstecz). Sprawdź datę lub podaj kurs ręcznie.`);
 };

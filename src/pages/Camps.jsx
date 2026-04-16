@@ -75,15 +75,27 @@ export default function Camps() {
     };
 
     const handleFixOrphans = async () => {
-        for (const orphan of orphanedCamps) {
-            if (orphan.reassignTo === '__clear__') {
-                await renameCampInTransactions(orphan.oldName, '');
-            } else if (orphan.reassignTo) {
-                await renameCampInTransactions(orphan.oldName, orphan.reassignTo);
-            }
+        const toProcess = orphanedCamps.filter(o => o.reassignTo);
+        if (toProcess.length === 0) {
+            alert('Nie wybrano żadnych akcji. Przypisz nowy wyjazd lub wybierz "Wyczyść" dla każdego osierocone wpisu.');
+            return;
         }
-        setOrphanedCamps([]);
-        setShowOrphanPanel(false);
+        if (!window.confirm(`Zaktualizować ${toProcess.length} grup transakcji? Tej operacji nie można cofnąć.`)) return;
+        try {
+            for (const orphan of orphanedCamps) {
+                if (orphan.reassignTo === '__clear__') {
+                    await renameCampInTransactions(orphan.oldName, '');
+                } else if (orphan.reassignTo) {
+                    await renameCampInTransactions(orphan.oldName, orphan.reassignTo);
+                }
+            }
+            setOrphanedCamps([]);
+            setShowOrphanPanel(false);
+        } catch (err) {
+            console.error('Błąd naprawy osieroconych wyjazdów:', err);
+            alert('Błąd podczas naprawy: ' + err.message + '\nCzęść zmian mogła zostać zapisana. Sprawdź dane.');
+            loadCamps(false);
+        }
     };
 
     const handleAddCamp = async () => {
