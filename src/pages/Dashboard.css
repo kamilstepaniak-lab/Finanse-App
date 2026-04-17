@@ -212,19 +212,51 @@
     flex-shrink: 0;
 }
 
-/* Apply / Clear filter buttons */
-.btn-filter-clear {
-    padding: 8px 16px;
-    border-radius: 10px;
-    border: 1.5px solid #E2EAFF;
+/* ── Danger ghost buttons (Zwrot / Usuń zaznaczone / Usuń duplikaty) ── */
+.btn-danger-ghost {
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1.5px solid #FECACA;
     background: #fff;
-    color: #64748B;
-    font-size: 13px;
+    color: #DC2626;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     font-family: 'Plus Jakarta Sans', sans-serif;
     transition: all 0.15s;
-    height: 36px;
+    white-space: nowrap;
+}
+
+.btn-danger-ghost:hover {
+    background: #FEF2F2;
+    border-color: #DC2626;
+}
+
+.btn-danger-ghost.active {
+    background: #DC2626;
+    color: #fff;
+    border-color: #DC2626;
+}
+
+/* ── Action buttons (filter / auto / ai / csv / cash) ── */
+.btn-filter-clear {
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1.5px solid #E2EAFF;
+    background: #fff;
+    color: #64748B;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    transition: all 0.15s;
+    white-space: nowrap;
 }
 
 .btn-filter-clear:hover {
@@ -233,17 +265,20 @@
 }
 
 .btn-filter-apply {
-    padding: 8px 20px;
-    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
     border: 1.5px solid var(--color-primary);
     background: var(--color-primary-light);
     color: var(--color-primary);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     cursor: pointer;
     font-family: 'Plus Jakarta Sans', sans-serif;
     transition: all 0.15s;
-    height: 36px;
+    white-space: nowrap;
 }
 
 .btn-filter-apply:hover {
@@ -263,30 +298,10 @@
     50% { box-shadow: 0 2px 18px rgba(21, 112, 239, 0.6); }
 }
 
-/* Danger ghost button */
-.btn-danger-ghost {
-    padding: 8px 14px;
-    border-radius: 10px;
-    border: 1.5px solid #FECACA;
-    background: #fff;
-    color: #DC2626;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    transition: all 0.15s;
-    height: 36px;
-}
-
-.btn-danger-ghost:hover {
-    background: #FEF2F2;
-    border-color: #DC2626;
-}
-
 /* Separator between filter actions and data actions */
 .filter-actions-separator {
     width: 1px;
-    height: 28px;
+    height: 22px;
     background: #E2EAFF;
     flex-shrink: 0;
 }
@@ -295,21 +310,33 @@
 .selection-info {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     font-size: 13px;
     color: #64748B;
     font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
+/* selection-delete-btn is now just btn-danger-ghost — kept for legacy */
 .selection-delete-btn {
-    border: none;
-    background: none;
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1.5px solid #FECACA;
+    background: #fff;
     color: #DC2626;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
     font-family: 'Plus Jakarta Sans', sans-serif;
-    padding: 0;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.selection-delete-btn:hover {
+    background: #FEF2F2;
+    border-color: #DC2626;
 }
 
 
@@ -560,18 +587,19 @@
 .btn-primary {
     background: var(--color-primary);
     color: #fff;
-    height: 36px;
-    padding: 0 16px;
-    border-radius: 10px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12px;
     cursor: pointer;
     border: none;
     transition: background 0.15s;
     font-family: 'Plus Jakarta Sans', sans-serif;
+    white-space: nowrap;
 }
 
 .btn-primary:hover { background: #0E5AC8; }
@@ -579,37 +607,41 @@
 .btn-secondary {
     background: transparent;
     color: var(--color-primary);
-    height: 36px;
-    padding: 0 16px;
-    border-radius: 10px;
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    font-weight: 700;
-    font-size: 13px;
-    cursor: pointer;
-    border: 1.5px solid var(--color-primary);
-    transition: all 0.15s;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-}
-
-.btn-secondary:hover { background: var(--color-primary-light); }
-
-.btn-ai-categorize {
-    height: 36px;
-    padding: 0 16px;
-    background: transparent;
-    color: #7C3AED;
-    border-radius: 10px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1.5px solid var(--color-primary);
+    transition: all 0.15s;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    white-space: nowrap;
+}
+
+.btn-secondary:hover { background: var(--color-primary-light); }
+
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-ai-categorize {
+    height: 30px;
+    padding: 0 12px;
+    background: transparent;
+    color: #7C3AED;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 12px;
     cursor: pointer;
     border: 1.5px solid #7C3AED;
     transition: all 0.15s;
     font-family: 'Plus Jakarta Sans', sans-serif;
+    white-space: nowrap;
 }
 
 .btn-ai-categorize:hover { background: #F5F3FF; }
@@ -647,13 +679,13 @@
    CASH BUTTON
 ═══════════════════════════════════════ */
 .btn-cash {
-    height: 36px;
-    padding: 0 16px;
-    border-radius: 10px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
     border: 1.5px solid #059669;
     background: #fff;
     color: #059669;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     cursor: pointer;
     font-family: 'Plus Jakarta Sans', sans-serif;

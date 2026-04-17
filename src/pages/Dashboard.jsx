@@ -1389,17 +1389,8 @@ export default function Dashboard() {
                                 const allRefunds = sel.length > 0 && sel.every(t => t.is_refund);
                                 return (
                                     <button
+                                        className={`btn-danger-ghost${allRefunds ? ' active' : ''}`}
                                         onClick={handleBulkRefund}
-                                        style={{
-                                            background: allRefunds ? '#F59E0B' : 'transparent',
-                                            color: allRefunds ? '#fff' : '#D97706',
-                                            border: `1px solid ${allRefunds ? '#F59E0B' : '#FCD34D'}`,
-                                            borderRadius: '6px',
-                                            padding: '3px 10px',
-                                            fontSize: '12px',
-                                            fontWeight: 600,
-                                            cursor: 'pointer',
-                                        }}
                                         title={allRefunds ? 'Odznacz zwrot' : 'Oznacz jako zwrot — odejmie od przychodów'}
                                     >
                                         {allRefunds ? '✓ Zwrot' : 'Zwrot'}
@@ -1441,7 +1432,6 @@ export default function Dashboard() {
                         className="btn-secondary"
                         onClick={autoAssignCampsToExisting}
                         disabled={loading || isImporting}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                         title={hasActiveFilters
                             ? `Auto-dopasuj TYLKO widoczne transakcje (${filteredTransactions?.length || 0} szt.)`
                             : "Auto-dopasuj wszystkie nieprzetworzone transakcje (bez ⚡)"
