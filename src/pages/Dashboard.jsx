@@ -232,6 +232,22 @@ export default function Dashboard() {
     };
 
     // Bulk Actions
+    const handleBulkRefund = async () => {
+        if (!selectedIds.size) return;
+        const ids = Array.from(selectedIds);
+        const selected = transactions.filter(t => ids.includes(t.id));
+        // If all selected are already refunds → unmark; otherwise mark all as refund
+        const allRefunds = selected.every(t => t.is_refund);
+        const newValue = !allRefunds;
+        setTransactions(prev => prev.map(t => ids.includes(t.id) ? { ...t, is_refund: newValue } : t));
+        await Promise.all(ids.map(id => updateTransaction(id, { is_refund: newValue })));
+        logActivity({
+            action: 'refund_toggle',
+            message: `${newValue ? 'Oznaczono' : 'Odznaczono'} ${ids.length} transakcji jako zwrot`,
+            details: { count: ids.length, ids, value: newValue },
+        }).catch(err => console.warn('logActivity failed:', err));
+    };
+
     const handleBulkDelete = async () => {
         if (!selectedIds.size) return;
         if (window.confirm(`Usunąć ${selectedIds.size} transakcji?`)) {
@@ -506,6 +522,29 @@ export default function Dashboard() {
             }).catch(err => console.warn('logActivity failed:', err));
         });
         if (targetIds.length > 1) setSelectedIds(new Set());
+    };
+
+    // Toggle refund flag — marks an income transaction as a refund
+    // so it offsets revenue (subtracts from category and camp totals) while
+    // still appearing in the dashboard with a visible badge.
+    const handleToggleRefund = async (t) => {
+        const newValue = !t.is_refund;
+        // Optimistic update
+        setTransactions(prev => prev.map(tx => tx.id === t.id ? { ...tx, is_refund: newValue } : tx));
+        try {
+            await updateTransaction(t.id, { is_refund: newValue });
+            logActivity({
+                action: 'refund_toggle',
+                transactionId: t.id,
+                snapshot: { ...t, is_refund: newValue },
+                changes: { is_refund: { from: !!t.is_refund, to: newValue } },
+                message: `${newValue ? 'Oznaczono jako zwrot' : 'Odznaczono zwrot'}: ${t.title || ''} (${t.amount?.toFixed(2)} PLN)`,
+            }).catch(err => console.warn('logActivity failed:', err));
+        } catch (e) {
+            // Rollback on error
+            setTransactions(prev => prev.map(tx => tx.id === t.id ? { ...tx, is_refund: !newValue } : tx));
+            console.error('Error toggling refund:', e);
+        }
     };
 
     // Sub-transactions
@@ -1117,7 +1156,11 @@ export default function Dashboard() {
         .filter(([pid]) => pid !== String(splitWizard?.parentId))
         .flatMap(([, kids]) => kids);
     const kpiItems   = [...kpiParents, ...kpiChildren];
-    const kpiIncome  = kpiItems.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    // Net income: positive transactions minus refunds (refunds offset revenue
+    // in their original category and camp).
+    const kpiIncomeGross = kpiItems.filter(t => t.amount > 0 && !t.is_refund).reduce((s, t) => s + t.amount, 0);
+    const kpiRefunds = kpiItems.filter(t => t.is_refund && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const kpiIncome  = kpiIncomeGross - kpiRefunds;
     const kpiExpense = kpiItems.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
 
     const kpiCount   = kpiItems.length;
@@ -1151,6 +1194,11 @@ export default function Dashboard() {
                         <span className="kpi-value" style={{ color: 'var(--color-success)' }}>{fmt(kpiIncome)} PLN</span>
                         {kpiEurIncome > 0 && (
                             <span className="kpi-badge" style={{ background: '#DBEAFE', color: '#1E40AF' }}>w tym {fmt(kpiEurIncome)} EUR</span>
+                        )}
+                        {kpiRefunds > 0 && (
+                            <span className="kpi-badge" style={{ background: '#FEF3C7', color: '#92400E' }} title="Zwroty odjęte od przychodu">
+                                − {fmt(kpiRefunds)} PLN zwroty
+                            </span>
                         )}
                     </div>
                 </div>
@@ -1336,6 +1384,28 @@ export default function Dashboard() {
                     {selectedIds.size > 0 && (
                         <div className="selection-info">
                             Zaznaczono: <strong>{selectedIds.size}</strong>
+                            {(() => {
+                                const sel = transactions.filter(t => selectedIds.has(t.id));
+                                const allRefunds = sel.length > 0 && sel.every(t => t.is_refund);
+                                return (
+                                    <button
+                                        onClick={handleBulkRefund}
+                                        style={{
+                                            background: allRefunds ? '#F59E0B' : 'transparent',
+                                            color: allRefunds ? '#fff' : '#D97706',
+                                            border: `1px solid ${allRefunds ? '#F59E0B' : '#FCD34D'}`,
+                                            borderRadius: '6px',
+                                            padding: '3px 10px',
+                                            fontSize: '12px',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                        }}
+                                        title={allRefunds ? 'Odznacz zwrot' : 'Oznacz jako zwrot — odejmie od przychodów'}
+                                    >
+                                        {allRefunds ? '✓ Zwrot' : 'Zwrot'}
+                                    </button>
+                                );
+                            })()}
                             <button className="selection-delete-btn" onClick={handleBulkDelete}>Usuń zaznaczone</button>
                         </div>
                     )}
@@ -1574,7 +1644,7 @@ export default function Dashboard() {
                                             );
                                         })()}
                                     </td>
-                                    <td className={t.amount > 0 ? 'amount-pos' : 'amount-neg'}>
+                                    <td className={t.amount > 0 ? 'amount-pos' : 'amount-neg'} style={t.is_refund ? { textDecoration: 'line-through', opacity: 0.65 } : {}}>
                                         {t.currency === 'EUR' ? (
                                             <>
                                                 <div style={{ fontWeight: 700 }}>{t.original_amount?.toFixed(2)} EUR</div>

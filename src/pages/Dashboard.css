@@ -312,21 +312,6 @@
     padding: 0;
 }
 
-/* Adjust btn-primary/btn-secondary heights to match */
-.btn-primary,
-.btn-secondary {
-    height: 36px;
-    padding: 0 16px;
-    border-radius: 10px;
-    font-size: 13px;
-}
-
-.btn-cash {
-    height: 36px;
-    padding: 0 16px;
-    border-radius: 10px;
-    font-size: 13px;
-}
 
 /* Legacy action-bar (kept for any leftover usage) */
 .action-bar {
@@ -575,7 +560,8 @@
 .btn-primary {
     background: var(--color-primary);
     color: #fff;
-    padding: 9px 18px;
+    height: 36px;
+    padding: 0 16px;
     border-radius: 10px;
     display: inline-flex;
     align-items: center;
@@ -593,7 +579,8 @@
 .btn-secondary {
     background: transparent;
     color: var(--color-primary);
-    padding: 9px 18px;
+    height: 36px;
+    padding: 0 16px;
     border-radius: 10px;
     display: inline-flex;
     align-items: center;
@@ -660,9 +647,9 @@
    CASH BUTTON
 ═══════════════════════════════════════ */
 .btn-cash {
-    height: 42px;
-    padding: 0 20px;
-    border-radius: 12px;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 10px;
     border: 1.5px solid #059669;
     background: #fff;
     color: #059669;

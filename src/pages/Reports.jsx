@@ -115,11 +115,19 @@ export default function Reports() {
             return true;
         }).sort((a, b) => a.date.localeCompare(b.date));
 
-        const income = filtered.filter(t => t.amount > 0).reduce((acc, t) => acc + t.amount, 0);
+        // Refunds are positive-amount transactions flagged as is_refund.
+        // They offset revenue in their own category/camp, so we subtract them
+        // from all income aggregations (KPIs, by-category, by-camp, monthly, weekly).
+        const incomeGross = filtered.filter(t => t.amount > 0 && !t.is_refund).reduce((acc, t) => acc + t.amount, 0);
+        const refundsTotal = filtered.filter(t => t.is_refund && t.amount > 0).reduce((acc, t) => acc + t.amount, 0);
+        const income = incomeGross - refundsTotal;
         const expense = filtered.filter(t => t.amount < 0).reduce((acc, t) => acc + Math.abs(t.amount), 0);
 
-        const incomeEUR = filtered.filter(t => t.amount > 0 && t.currency === 'EUR')
+        const incomeGrossEUR = filtered.filter(t => t.amount > 0 && !t.is_refund && t.currency === 'EUR')
             .reduce((acc, t) => acc + (t.original_amount || 0), 0);
+        const refundsEUR = filtered.filter(t => t.is_refund && t.amount > 0 && t.currency === 'EUR')
+            .reduce((acc, t) => acc + (t.original_amount || 0), 0);
+        const incomeEUR = incomeGrossEUR - refundsEUR;
         const expenseEUR = filtered.filter(t => t.amount < 0 && t.currency === 'EUR')
             .reduce((acc, t) => acc + Math.abs(t.original_amount || 0), 0);
 
@@ -129,23 +137,27 @@ export default function Reports() {
             .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
             .slice(0, 20);
 
-        // Monthly History — use the same date-filtered dataset so chart stays in sync with KPIs
+        // Monthly History — use the same date-filtered dataset so chart stays in sync with KPIs.
+        // Refunds subtract from income in their month.
         const monthlyMap = {};
         filtered.forEach(t => {
             if (!t.date) return;
             const month = t.date.slice(0, 7);
             if (!monthlyMap[month]) monthlyMap[month] = { month, income: 0, expense: 0 };
-            if (t.amount > 0) monthlyMap[month].income += t.amount;
-            else if (t.amount < 0) monthlyMap[month].expense += Math.abs(t.amount);
+            if (t.amount > 0) {
+                monthlyMap[month].income += t.is_refund ? -t.amount : t.amount;
+            } else if (t.amount < 0) {
+                monthlyMap[month].expense += Math.abs(t.amount);
+            }
         });
         const monthlyData = Object.values(monthlyMap).sort((a, b) => a.month.localeCompare(b.month));
 
-        // Income by Categories
+        // Income by Categories — refunds subtract from their original category.
         const incomeByCatMap = {};
         filtered.filter(t => t.amount > 0).forEach(t => {
             const c = t.category || 'Nieprzypisane';
             if (!incomeByCatMap[c]) incomeByCatMap[c] = 0;
-            incomeByCatMap[c] += t.amount;
+            incomeByCatMap[c] += t.is_refund ? -t.amount : t.amount;
         });
         const incomeByCategoryData = Object.keys(incomeByCatMap).map(name => ({ name, value: incomeByCatMap[name] }))
             .sort((a, b) => b.value - a.value);
@@ -162,11 +174,12 @@ export default function Reports() {
                 ? t.camp
                 : 'Bez przypisanego wyjazdu';
             if (!incomeByCampMap[campName]) incomeByCampMap[campName] = 0;
-            incomeByCampMap[campName] += t.amount;
+            // Refunds subtract from their original camp's income.
+            incomeByCampMap[campName] += t.is_refund ? -t.amount : t.amount;
 
             if (t.currency === 'EUR') {
                 if (!incomeEURByCampMap[campName]) incomeEURByCampMap[campName] = 0;
-                incomeEURByCampMap[campName] += (t.original_amount || 0);
+                incomeEURByCampMap[campName] += t.is_refund ? -(t.original_amount || 0) : (t.original_amount || 0);
             }
         });
 
@@ -192,17 +205,17 @@ export default function Reports() {
             const monday = new Date(d.setDate(diff));
             const weekKey = monday.toISOString().slice(0, 10);
             if (!weeklyMap[weekKey]) weeklyMap[weekKey] = { week: weekKey, income: 0, expense: 0 };
-            if (t.amount > 0) weeklyMap[weekKey].income += t.amount;
+            if (t.amount > 0) weeklyMap[weekKey].income += t.is_refund ? -t.amount : t.amount;
             else if (t.amount < 0) weeklyMap[weekKey].expense += Math.abs(t.amount);
         });
         const weeklyData = Object.values(weeklyMap).sort((a, b) => a.week.localeCompare(b.week));
 
-        // Top contractors (income by sender)
+        // Top contractors (income by sender) — refunds reduce a contractor's net.
         const senderMap = {};
         filtered.filter(t => t.amount > 0).forEach(t => {
             const s = t.sender || 'Nieznany';
             if (!senderMap[s]) senderMap[s] = { name: s, total: 0, count: 0 };
-            senderMap[s].total += t.amount;
+            senderMap[s].total += t.is_refund ? -t.amount : t.amount;
             senderMap[s].count += 1;
         });
         const topContractors = Object.values(senderMap).sort((a, b) => b.total - a.total).slice(0, 20);
@@ -223,7 +236,7 @@ export default function Reports() {
                 return; // przychody niebędące turystyczną bez obozu — nie wliczaj do rentowności
             }
             if (!campProfitMap[campName]) campProfitMap[campName] = { name: campName, income: 0, expense: 0 };
-            if (t.amount > 0) campProfitMap[campName].income += t.amount;
+            if (t.amount > 0) campProfitMap[campName].income += t.is_refund ? -t.amount : t.amount;
             else if (t.amount < 0) campProfitMap[campName].expense += Math.abs(t.amount);
         });
         const campProfitability = Object.values(campProfitMap)
@@ -247,7 +260,7 @@ export default function Reports() {
                 if (t.date < pf || t.date > pt) return false;
                 return true;
             });
-            const prevIncome = prevFiltered.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+            const prevIncome = prevFiltered.filter(t => t.amount > 0).reduce((s, t) => s + (t.is_refund ? -t.amount : t.amount), 0);
             const prevExpense = prevFiltered.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
             prevStats = { income: prevIncome, expense: prevExpense, dateFrom: pf, dateTo: pt };
         }

@@ -18,10 +18,10 @@ export default function Zwroty() {
     const loadData = async () => {
         setLoading(true);
         const all = await getAllTransactions();
-        // Exclude split parents — their children carry the real allocation and may
-        // individually be 'Zwrot'. Counting the parent would double-count.
+        // Refunds are transactions explicitly flagged via the is_refund column.
+        // Split parents are excluded; if a split child is flagged, it carries the refund on its own.
         const splitParentIds = new Set(all.filter(t => t.parent_id).map(t => t.parent_id));
-        setTransactions(all.filter(t => t.category === 'Zwrot' && !splitParentIds.has(t.id)));
+        setTransactions(all.filter(t => t.is_refund === true && !splitParentIds.has(t.id)));
         setLoading(false);
     };
 
@@ -40,7 +40,7 @@ export default function Zwroty() {
             </div>
             {transactions.length === 0 ? (
                 <div className="empty-state">
-                    <p>Brak transakcji ze kategorią "Zwrot".</p>
+                    <p>Brak oznaczonych zwrotów. Zaznacz transakcję jako zwrot na Dashboardzie, aby pojawiła się tutaj.</p>
                 </div>
             ) : (
                 <table className="transactions-table">
@@ -49,8 +49,9 @@ export default function Zwroty() {
                             <th>Data</th>
                             <th>Nadawca / Odbiorca</th>
                             <th>Tytuł</th>
-                            <th>Kwota</th>
+                            <th>Kategoria</th>
                             <th>Wyjazd</th>
+                            <th>Kwota</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -59,10 +60,11 @@ export default function Zwroty() {
                                 <td>{t.date}</td>
                                 <td>{t.sender}</td>
                                 <td>{t.title}</td>
+                                <td>{t.category || '—'}</td>
+                                <td>{t.camp || '—'}</td>
                                 <td className={t.amount > 0 ? 'amount-pos' : 'amount-neg'}>
                                     {t.amount?.toFixed(2)} PLN
                                 </td>
-                                <td>{t.camp || '—'}</td>
                             </tr>
                         ))}
                     </tbody>
